@@ -10,12 +10,13 @@ Bloodline is a personal, family-scale web app that:
 
 1. Accepts lab reports (blood/urine panels) as **digitally generated PDFs** (e.g. Thyrocare reports issued via Healthcare OnTime).
 2. Extracts the text layer, structures it into metrics with an LLM, and asks the uploader to **review and confirm** the values before saving.
-3. Stores each family member's results as a longitudinal history in Postgres.
-4. Shows history and **per-metric trend charts** with the reference range drawn as a shaded band.
-5. Answers **natural-language questions** about a family member's data through a tool-calling AI agent, with semantic search over report text (RAG).
-6. **Flags and explains** out-of-range values and notable trends. It does **not** diagnose.
+3. Organizes people into **families**, like a file system: a user (the root) creates families (folders), adds family members to them, and each member's reports and analysis are the files (Section 4.5).
+4. Stores each family member's results as a longitudinal history in Postgres.
+5. Shows history, **per-metric trend charts** with the reference range drawn as a shaded band, and a **family overview** of every member's latest out-of-range values.
+6. Answers **natural-language questions** about one family member or across a whole family through a tool-calling AI agent, with semantic search over report text (RAG).
+7. **Flags and explains** out-of-range values and notable trends. It does **not** diagnose.
 
-Users: a handful of family members with manually created accounts. It is also a portfolio project, so code quality, tests, Docker, and CI/CD matter as much as features.
+Users: a handful of accounts created manually; each account sees only the families it created. It is also a portfolio project, so code quality, tests, Docker, and CI/CD matter as much as features.
 
 ---
 
@@ -23,9 +24,9 @@ Users: a handful of family members with manually created accounts. It is also a 
 
 1. **Flag and explain, never diagnose.** The app may say a value is outside its reference range, describe what the marker generally relates to, show the trend, and suggest discussing it with a doctor. It must never state or imply a diagnosis ("you have X"), and never recommend medication or dosing. Every AI-generated health explanation shows a short "not medical advice — discuss with your doctor" note.
 2. **Privacy by design.**
-   - Never send patient names, addresses, phone numbers, barcodes, or referring-doctor names to any LLM. Parse identity/header fields locally, scrub them from the text before any LLM call, and reattach identity only on our own backend.
+   - Never send patient names, addresses, phone numbers, barcodes, or referring-doctor names to any LLM. Parse identity/header fields locally, scrub them from the text before any LLM call, and reattach identity only on our own backend. Family members' display names are never sent either: prompts use pseudonymous labels ("the patient", or "Member A", "Member B" in family chat) that only our backend maps back to names.
    - Never commit real reports or real patient data. `samples/` and any `*.pdf` outside `backend/tests/fixtures/` are gitignored. Test fixtures must be **synthetic** (fake names, fake addresses, made-up values in the same layout).
-   - Every data access is scoped by `patient_id` and checked against the logged-in user's access. Vector searches **always** apply a hard `patient_id` filter in SQL; never rely on semantic similarity alone.
+   - Every data access is scoped by `patient_id` (or, for family-level views, by the exact set of patient ids in one family) and checked against the logged-in user's ownership of that family. Vector searches **always** apply a hard `patient_id` filter in SQL (one id, or the family's ids); never rely on semantic similarity alone.
    - Secrets live only in environment variables. `.env` is gitignored; `.env.example` is committed with placeholders.
 3. **Long-format metrics, never dynamic columns.** One row per metric reading. New biomarkers are new rows, not `ALTER TABLE`. Schema changes go through Alembic migrations only.
 4. **Structured data for numbers, RAG for text.** Numeric and trend questions are answered from SQL via tools. Vector search is only for free text (report notes, method text, remarks) and never replaces exact values.
@@ -76,7 +77,7 @@ Model IDs and SDK APIs change. Before writing integration code, confirm current 
 ┌────────────▼─────────────────────────────────────────────┐
 │ FastAPI (Docker on Render)                               │
 │                                                          │
-│  /auth   /patients   /reports   /metrics   /chat         │
+│  /auth  /families  /patients  /reports  /metrics  /chat  │
 │                                                          │
 │  Ingestion pipeline (BackgroundTasks):                   │
 │   PDF → pdfplumber text → local header parse             │
@@ -111,8 +112,9 @@ Model IDs and SDK APIs change. Before writing integration code, confirm current 
 ### 4.2 Data model (long format)
 
 - `users` — id, email, password_hash, display_name, created_at
-- `patients` — id, display_name, sex, date_of_birth (nullable), created_at
-- `user_patient_access` — user_id, patient_id, role (`owner` | `viewer`). One user can manage several family members.
+- `families` — id, owner_id (→ users, cascade), name, created_at. Unique `(owner_id, name)`. Only the owner can see a family (Section 4.5).
+- `patients` — id, family_id (→ families, cascade, required), display_name, sex, date_of_birth (nullable), created_at. A "patient" is a **family member**; the UI says "family member", the schema and API say `patients`.
+- ~~`user_patient_access`~~ — created in Phase 3, **dropped in Phase 4b**: access now follows family ownership.
 - `reports` — id, patient_id, lab_name, collected_at, file_sha256, file_path/blob, status (`processing` | `pending_review` | `confirmed` | `failed`), failure_reason, raw_extraction (JSONB), created_at
 - `metric_dictionary` — id, canonical_name, category, canonical_unit, aliases (text[]), description, loinc_code (nullable)
 - `metrics` — id, patient_id, report_id, canonical_metric_id (nullable), raw_name, value_numeric, value_text, unit, value_canonical, unit_canonical, reference_low, reference_high, reference_text, flag (`low` | `normal` | `high` | `unknown`), sample_type, method, collected_at
@@ -124,9 +126,11 @@ Seed `metric_dictionary` with common panels (CBC, lipid profile, liver, kidney, 
 
 ### 4.3 Query agent
 
-- Endpoint `POST /patients/{id}/chat` (access-checked). Resolve the patient server-side; the model sees a pseudonymous label ("the patient"), never a name.
+- Two scopes, both access-checked through family ownership:
+  - **Member chat** `POST /patients/{id}/chat`: the model sees one pseudonymous label ("the patient"), never a name.
+  - **Family chat** `POST /families/{id}/chat` (e.g. "who in my family has high LDL?"): the model sees members only as labels ("Member A", with sex and age), built server-side from that family's members. Every tool takes an optional `member` label, which the backend validates against the family and resolves to a `patient_id`; omitting it runs the tool across all of the family's members. Before the reply reaches the user, the backend maps labels back to display names.
 - Model: `gpt-oss-120b` with tool calling. Max tool-call iterations per question (e.g. 5).
-- Tools (all implicitly scoped to the current patient_id, which the model cannot change):
+- Tools (scoped to the current patient_id, or to the current family's patient ids in family chat; the model can never widen the scope):
   - `list_available_metrics()`
   - `get_metric_history(metric, start_date?, end_date?)`
   - `get_latest_values(metrics?)`
@@ -141,6 +145,23 @@ Seed `metric_dictionary` with common panels (CBC, lipid profile, liver, kidney, 
 
 - Flag each value against its reference range.
 - Trend alerts computed in Python: e.g. value moved more than a configurable % across the last N reports while still in range, or crossed a range boundary. The LLM only phrases explanations; it does not compute them.
+
+### 4.5 Families and access (file-system model)
+
+| File system | Bloodline |
+|---|---|
+| root directory | a user **account** |
+| folder | a **family** the user created (e.g. "Sharma family") |
+| items in the folder | **family members** (`patients`) |
+| files | each member's **reports, metrics, charts and chat** |
+
+Rules (agreed with the user before Phase 4b):
+- A user can create any number of families. Each family member belongs to exactly one family.
+- **Only a family's creator can see it**: its members, their reports and all analysis. No sharing with other accounts (can be added later with a `family_access` table without redesign).
+- Anything the user may not see answers **404**, exactly like something that does not exist.
+- Deleting a family deletes its members and everything under them; deleting a user deletes their families.
+- Access checks: `get_owned_family` for `{family_id}` routes, `get_owned_patient` for `{patient_id}` routes (the patient's family must be owned by the current user). A test fails if any route with those path parameters skips its check.
+- Family-level analysis: a **family overview** (every member's latest out-of-range values side by side) and **family chat** (Section 4.3). Both only ever read the patient ids of that one family.
 
 ---
 
@@ -252,6 +273,13 @@ Each phase ends with a manual commit by the user.
 - Tests: login, access denial across users/patients.
 - Commit: `feat(auth): add jwt auth, patients and access control`
 
+### Phase 4b — Families
+- Added after Phase 4 at the user's request (Section 4.5). `families` table (owner, name), required `patients.family_id`; migration moves existing patients into a "My family" per owner and drops `user_patient_access`.
+- Access by family ownership: `get_owned_family` / `get_owned_patient`; only a family's creator can see it (404 otherwise).
+- API: `GET/POST /families`, `GET/PATCH/DELETE /families/{family_id}`, `GET/POST /families/{family_id}/patients`; `GET/PATCH/DELETE /patients/{patient_id}` keep working; `GET/POST /patients` are replaced by the family routes.
+- Tests: family CRUD, isolation between users, cascade deletes, the data migration, and the structural access test extended to `{family_id}` routes.
+- Commit: `feat(families): group family members into user-owned families`
+
 ### Phase 5 — PDF text extraction, header parsing, PII scrubbing
 - `pdfplumber` extraction, boilerplate page filtering, header regexes (dates, sample type, `(56Y/M)`-style age/sex), PII scrubber.
 - Create a **synthetic** fixture PDF matching the Thyrocare layout (fake identity, sex-specific ranges, "Less than" ranges, µg/mL units).
@@ -269,11 +297,12 @@ Each phase ends with a manual commit by the user.
 
 ### Phase 8 — History and metrics API
 - Report list/detail, metric catalog per patient, time series per metric (with reference ranges), latest values, out-of-range list.
+- Family overview endpoint `GET /families/{family_id}/overview`: each member's latest out-of-range values, side by side.
 - Commit: `feat(metrics): add history and time-series endpoints`
 
 ### Phase 9 — Frontend scaffold and auth
-- Vite + React + TS + Tailwind, routing, API client, TanStack Query, login page, protected routes, patient switcher. Apply the frontend-design skill.
-- Commit: `feat(frontend): scaffold app with auth and patient switcher`
+- Vite + React + TS + Tailwind, routing, API client, TanStack Query, login page, protected routes, family navigation (families list → family → member pages, like folders and files), create/rename/delete families and members. Apply the frontend-design skill.
+- Commit: `feat(frontend): scaffold app with auth and family navigation`
 
 ### Phase 10 — Frontend upload and review
 - Upload with progress/status polling, review table beside a PDF preview, inline edits, confirm.
@@ -281,24 +310,25 @@ Each phase ends with a manual commit by the user.
 
 ### Phase 11 — Frontend history and charts
 - Report timeline, per-metric Recharts line charts with shaded reference band and flagged points, latest-values dashboard.
+- Family overview page: every member's latest out-of-range values side by side (never color-only).
 - Commit: `feat(frontend): add history dashboard and trend charts`
 
 ### Phase 12 — Embeddings and vector search
-- Local `bge-small-en-v1.5` via fastembed, chunking of scrubbed report text on confirm, HNSW index, `search_report_text` service with hard `patient_id` filter.
-- Tests: a search for patient A never returns patient B's chunks.
+- Local `bge-small-en-v1.5` via fastembed, chunking of scrubbed report text on confirm, HNSW index, `search_report_text` service with a hard `patient_id` filter (one member, or the exact patient ids of one family for family chat).
+- Tests: a search for patient A never returns patient B's chunks; a family-scoped search never returns another family's chunks.
 - Commit: `feat(rag): add local embeddings and patient-scoped vector search`
 
 ### Phase 13 — Query agent
-- Tool definitions (Section 4.3), `gpt-oss-120b` orchestrator loop with iteration cap, deterministic trend helpers, no-diagnosis system prompt, `/chat` endpoint.
-- Tests: tool functions; orchestrator with a mocked LLM; guardrail prompt present.
+- Tool definitions (Section 4.3), `gpt-oss-120b` orchestrator loop with iteration cap, deterministic trend helpers, no-diagnosis system prompt, member chat `POST /patients/{id}/chat` and family chat `POST /families/{id}/chat` (pseudonymous member labels, mapped back to names only on the backend).
+- Tests: tool functions; orchestrator with a mocked LLM; guardrail prompt present; family chat never sends display names to the LLM and cannot reach members of another family.
 - Commit: `feat(agent): add tool-calling query agent`
 
 ### Phase 14 — Frontend chat
-- Chat panel per patient, streaming or loading state, citations of report dates, disclaimer.
+- Chat panel per member and per family, streaming or loading state, citations of report dates (and which member), disclaimer.
 - Commit: `feat(frontend): add patient chat interface`
 
 ### Phase 15 — Flags and trend insights
-- Deterministic trend alerts (Section 4.4), insights panel on the dashboard, LLM-phrased plain-language explanations with the disclaimer.
+- Deterministic trend alerts (Section 4.4), insights panel on each member's dashboard and in the family overview, LLM-phrased plain-language explanations with the disclaimer.
 - Commit: `feat(insights): add range flags and trend alerts`
 
 ### Phase 16 — Deployment (CD)
@@ -366,7 +396,17 @@ Each phase ends with a manual commit by the user.
   - CI: each job generates a masked throwaway `JWT_SECRET`; the docker job also creates a user with the CLI inside the image, logs in over HTTP, calls `/auth/me`, and checks unauthenticated `/patients` is 401 (replayed locally end-to-end).
   - Code review (engineering:code-review) findings, both fixed: 422 bodies echoed submitted values (password reflected); a malformed stored hash raised `UnknownHashError` → 500, distinguishable from 401.
   - Context7 still not loaded in this session (needs a Claude Code restart); docs were checked against upstream sources (pwdlib README, PyJWT usage + changelog, FastAPI release notes).
-  - Follow-ups: **Sharing** — no way yet to grant another user `viewer`/`owner` access (decide: CLI or UI). **Phase 17** — login rate limiting; token revocation (tokens stay valid until expiry, and there is no password-change endpoint yet). Minor: `create_user` CLI shows a traceback if two runs race on the same email (unique constraint still holds). Optional: a compose healthcheck for `api` so `docker compose up --wait` means "serving", not just "started".
+  - Follow-ups: **Sharing** — resolved by the user's families decision (Phase 4b, Section 4.5): families are visible only to their creator. **Phase 17** — login rate limiting; token revocation (tokens stay valid until expiry, and there is no password-change endpoint yet). Minor: `create_user` CLI shows a traceback if two runs race on the same email (unique constraint still holds). Optional: a compose healthcheck for `api` so `docker compose up --wait` means "serving", not just "started".
+- [x] Phase 4b — Families (inserted after Phase 4 at the user's request; see Section 4.5)
+  - Design agreed with the user first (Section 4.5): file-system model; only a family's creator can see it; any number of families per user; each member in exactly one family; family overview + family chat planned for later phases (Phases 8, 11–15 updated).
+  - `app/models/family.py` (`families`: `owner_id` → users cascade, `name`, `UNIQUE(owner_id, name)`); `patients.family_id` required (→ families cascade, indexed); `UserPatientAccess`/`AccessRole` removed.
+  - Migration `2026_09_24_fd63c4d93886_add_families.py` (autogenerated, rewritten by hand — the draft dropped the access table before reading it): creates `families`, adds nullable `family_id`, moves each owner's patients into one "My family" (earliest owner wins; viewer rows ignored), **refuses** (raises) if any patient has no owner instead of deleting it, then makes `family_id` NOT NULL and drops `user_patient_access`. Downgrade rebuilds owner access rows from families. Plain-SQL `op.execute` avoids `:` (bind-parameter syntax, per Alembic docs via Context7).
+  - Access: `get_owned_family` / `get_owned_patient` in `app/api/deps.py` (join through `families.owner_id`); 404 "Family not found" / "Patient not found" for anything not owned, identical to nonexistent ids. `require_owner` and roles removed.
+  - API (`app/api/families.py`, `app/api/patients.py`): `GET/POST /families` (list with `patient_count`, create; 409 on a duplicate name), `GET/PATCH/DELETE /families/{family_id}`, `GET/POST /families/{family_id}/patients`, `GET/PATCH/DELETE /patients/{patient_id}`. `GET/POST /patients` removed. Moving a member between families is not supported (`family_id` in a body is a 422).
+  - Tests (125 total): family CRUD and name uniqueness per owner, list counts, cascade deletes (member / family / user), cross-user isolation matrix (404 identical to nonexistent, nothing changed), 401s, validation, no-echo of member names, and three data-migration tests (upgrade from the Phase 3 schema with real rows, downgrade rebuilding access, orphan refusal). The structural test (`tests/test_access_control.py`) now covers `{family_id}` → `get_owned_family` and `{patient_id}` → `get_owned_patient`; verified to flag deliberately unprotected routes of both kinds.
+  - CI docker smoke now also creates a family and a member through the API inside the image, and checks unauthenticated `/families` is 401 (replayed locally end-to-end on an empty DB).
+  - Context7 used (Alembic operations docs). Code review: no defects found; added an assertion for `patient_count` in the family list (a separate query path from the detail view).
+  - Follow-ups: family names are unique per owner case-sensitively ("Sharma" and "sharma" can coexist) — fine for now. Concurrent creation of the same family name could hit the unique constraint as a 500 (pre-check covers normal use). Family overview endpoint → Phase 8; family navigation UI → Phase 9; family chat → Phases 13–14.
 - [ ] Phase 5 — PDF text extraction, header parsing, PII scrubbing
 - [ ] Phase 6 — LLM structuring and normalization
 - [ ] Phase 7 — Upload, review and confirm API
@@ -381,7 +421,7 @@ Each phase ends with a manual commit by the user.
 - [ ] Phase 16 — Deployment (CD)
 - [ ] Phase 17 — Hardening and polish
 
-**Next step:** Phase 5 — PDF text extraction, header parsing, PII scrubbing (after the user commits Phase 4 and CI is green). Phase 5 needs a real Thyrocare PDF in `samples/` (gitignored) to model the synthetic fixture on.
+**Next step:** Phase 5 — PDF text extraction, header parsing, PII scrubbing (after the user commits Phase 4b and CI is green). The sample Thyrocare PDF is already in `samples/` (gitignored).
 
 ---
 
@@ -433,7 +473,13 @@ Use whatever is installed in this environment when it helps. Check what is avail
 | JSON login + `Authorization: Bearer` (not OAuth2 password form) | Natural for the React SPA; no `python-multipart` until uploads need it (Phase 7) |
 | No access to a patient → 404, same as a nonexistent id; viewer editing → 403 | Never reveal that another family member's record exists |
 | 422 validation errors never echo submitted values | Default FastAPI errors reflect inputs (passwords, patient names) back to the client and into any logs |
-| Structural test: every `{patient_id}` route must depend on `get_patient_access` | Makes Principle 2's access check impossible to forget in later phases |
+| Structural test: every `{patient_id}` route must depend on its access check (since Phase 4b: `get_owned_patient`, and `{family_id}` on `get_owned_family`) | Makes Principle 2's access check impossible to forget in later phases |
+| *Families (user's decision before Phase 5, built as Phase 4b):* | |
+| File-system model: user → families → family members → reports/analysis | The user's requested mental model; groups each person's data under a family they manage |
+| Only a family's creator can see it; any number of families per user; each member in exactly one family | User's choices; simplest model for 2–3 people; sharing can be added later via a `family_access` table |
+| `user_patient_access` dropped; access = `patients.family_id → families.owner_id` | One source of truth for access; the viewer role had no use without sharing |
+| Keep the name `patients` in schema and API; UI says "family member" | Avoids renaming across models, migrations and every later phase's `/patients/{id}/...` routes |
+| Family overview + family chat, with members shown to the LLM only as labels ("Member A") | User's choice; keeps Principle 2 (no names to LLMs) while allowing cross-member questions |
 
 ### Deferred (revisit only if needed)
 - OCR fallback for scanned/photographed reports: Tesseract first, vision model only for low-confidence pages.

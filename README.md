@@ -4,10 +4,14 @@
 
 Bloodline is a small web app for tracking a family's lab results over time.
 
-Upload a lab report PDF (blood or urine panel) and Bloodline extracts the values. You check
-and confirm them, and they are added to that family member's history. From there you can
-view trend charts with the reference range shaded, see which values are out of range, and
-ask questions in plain English, such as *"How has my HbA1c changed over the last two years?"*
+It works like a file system: your account is the root, each **family** you create is a
+folder, and each **family member** in it holds their own reports and analysis.
+
+Upload a lab report PDF (blood or urine panel) for a family member and Bloodline extracts the
+values. You check and confirm them, and they are added to that member's history. From there
+you can view trend charts with the reference range shaded, see which values are out of range
+(for one member or the whole family), and ask questions in plain English, such as *"How has
+Mum's HbA1c changed over the last two years?"* or *"Who in the family has high LDL?"*
 
 > **Not medical advice.** Bloodline flags values outside their reference range and explains
 > what a marker generally relates to. It never diagnoses and never recommends medication.
@@ -19,15 +23,19 @@ ask questions in plain English, such as *"How has my HbA1c changed over the last
 
 ## Features (planned)
 
+- **Families**: group family members into families you create. Only you can see your
+  families, their members and everything under them.
 - **PDF ingestion**: reads the text layer of digitally generated lab PDFs (no OCR).
 - **Privacy-first structuring**: names, addresses, phone numbers, barcodes and doctor
   names are removed locally before any text goes to an LLM.
 - **Human review**: extracted values are held as *pending review* until you confirm or
   correct them.
 - **History and trend charts**: charts for each metric, with the reference range drawn as a
-  band and out-of-range points flagged.
-- **Ask questions**: an AI agent answers from your data. It uses SQL tools for numbers and
-  semantic search (RAG) for report notes, always limited to the selected family member.
+  band and out-of-range points flagged, plus a family overview of every member's latest
+  out-of-range values.
+- **Ask questions**: an AI agent answers from your data, about one member or across a family.
+  It uses SQL tools for numbers and semantic search (RAG) for report notes, always limited to
+  that member or family. The LLM sees members only as labels ("Member A"), never names.
 - **Flags and trend alerts**: computed in code, not by the LLM. The LLM only writes the
   plain-language explanation.
 
@@ -174,12 +182,26 @@ curl -s -X POST http://localhost:8000/auth/login \
   -d '{"email": "you@example.com", "password": "..."}'
 # {"access_token": "eyJ...", "token_type": "bearer", "expires_in": 86400}
 
-curl -s http://localhost:8000/patients -H "Authorization: Bearer eyJ..."
+TOKEN=eyJ...
+curl -s -X POST http://localhost:8000/families -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"name": "Sharma Family"}'
+# {"id": "<family id>", "name": "Sharma Family", "patient_count": 0, ...}
+
+curl -s -X POST http://localhost:8000/families/<family id>/patients \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"display_name": "Mum", "sex": "female", "date_of_birth": "1962-04-10"}'
 ```
 
-Family members ("patients") are created through the API; whoever creates one becomes its
-**owner**. Only owners can edit or delete a patient; **viewers** can only read. A user who
-has no access to a patient gets `404 Not Found`, exactly as if it did not exist.
+| Endpoint | What it does |
+|---|---|
+| `GET /families`, `POST /families` | list your families (with member counts), create one |
+| `GET/PATCH/DELETE /families/{id}` | view, rename, delete a family (deletes its members and all their data) |
+| `GET/POST /families/{id}/patients` | list a family's members, add a member |
+| `GET/PATCH/DELETE /patients/{id}` | view, edit, delete one family member |
+
+Only a family's creator can see it. Anything you cannot see answers `404 Not Found`, exactly
+as if it did not exist, so other users' families are never revealed. In the API a family
+member is called a *patient*.
 
 ### Frontend *(available from Phase 9)*
 
@@ -215,16 +237,17 @@ pull request, and on demand:
 - **Docker image**: builds `backend/Dockerfile` with layer caching, starts the image
   against Postgres, checks that `/health` returns 200 and that the container is not running
   as root, then migrates and seeds the empty database from inside the image (twice for the
-  seed, to prove it is idempotent).
+  seed, to prove it is idempotent), creates a user with the CLI, logs in, and creates a
+  family and a member through the API.
 
 ## Privacy
 
 - Real reports go in `samples/`, which is gitignored along with every `*.pdf` outside
   `backend/tests/fixtures/`. Test fixtures are synthetic.
 - Identity fields are parsed and removed locally. The LLM sees scrubbed text, and the query
-  agent refers to "the patient", never a name.
-- Every data access is scoped to a patient and checked against the logged-in user's access.
-  Vector search always applies a hard `patient_id` filter.
+  agent refers to "the patient" (or "Member A", "Member B" in family chat), never a name.
+- Every data access is scoped to one family member, or to one family's members, and checked
+  against ownership of that family. Vector search always applies a hard `patient_id` filter.
 - Secrets live only in environment variables. `.env` is never committed.
 
 ## Roadmap
@@ -236,6 +259,7 @@ pull request, and on demand:
 | 2 | Continuous integration |
 | 3 | Database models and migrations |
 | 4 | Authentication and patients |
+| 4b | Families (user-owned groups of family members) |
 | 5 | PDF text extraction, header parsing, PII scrubbing |
 | 6 | LLM structuring and normalization |
 | 7 | Upload, review and confirm API |

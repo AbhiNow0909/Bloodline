@@ -4,7 +4,7 @@ from typing import Annotated, Self
 
 from pydantic import BaseModel, ConfigDict, PastDate, StringConstraints, model_validator
 
-from app.models import AccessRole, Patient, Sex
+from app.models import Sex
 
 DisplayName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
 
@@ -35,22 +35,13 @@ class PatientUpdate(BaseModel):
 
 
 class PatientRead(BaseModel):
+    """A family member."""
+
+    model_config = ConfigDict(from_attributes=True)
+
     id: uuid.UUID
+    family_id: uuid.UUID
     display_name: str
     sex: Sex
     date_of_birth: date | None
     created_at: datetime
-    role: AccessRole  # the requesting user's role for this patient
-
-    @classmethod
-    def from_model(cls, patient: Patient, role: str) -> Self:
-        return cls.model_validate(
-            {
-                "id": patient.id,
-                "display_name": patient.display_name,
-                "sex": patient.sex,
-                "date_of_birth": patient.date_of_birth,
-                "created_at": patient.created_at,
-                "role": role,
-            }
-        )

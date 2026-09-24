@@ -1,7 +1,7 @@
-"""Shared FastAPI dependencies: database session, current user, patient access."""
+"""Shared FastAPI dependencies: database session, current user, and access to
+families and family members (patients) through family ownership."""
 
 import uuid
-from dataclasses import dataclass
 from typing import Annotated
 
 import jwt
@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import Patient, User, UserPatientAccess
+from app.models import Family, Patient, User
 from app.security import decode_access_token
 
 DbSession = Annotated[Session, Depends(get_db)]
@@ -44,42 +44,36 @@ def get_current_user(
 CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
-@dataclass(frozen=True)
-class PatientAccess:
-    patient: Patient
-    role: str
+def get_owned_family(family_id: uuid.UUID, user: CurrentUser, db: DbSession) -> Family:
+    """Resolve `{family_id}` for the current user. Every route with `{family_id}` in its path
+    must depend on this (a test enforces it).
 
-
-def get_patient_access(patient_id: uuid.UUID, user: CurrentUser, db: DbSession) -> PatientAccess:
-    """Resolve `{patient_id}` for the current user.
-
-    Every route with `{patient_id}` in its path must depend on this (a test enforces it).
-    Missing access is a 404, not a 403, so other patients' existence is never revealed.
+    Only a family's creator can see it; for anyone else it is a 404, exactly like a family
+    that does not exist, so its existence is never revealed.
     """
-    row = (
-        db.execute(
-            select(Patient, UserPatientAccess.role)
-            .join(UserPatientAccess, UserPatientAccess.patient_id == Patient.id)
-            .where(Patient.id == patient_id, UserPatientAccess.user_id == user.id)
-        )
-        .tuples()
-        .one_or_none()
+    family = db.scalar(select(Family).where(Family.id == family_id, Family.owner_id == user.id))
+    if family is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Family not found")
+    return family
+
+
+OwnedFamily = Annotated[Family, Depends(get_owned_family)]
+
+
+def get_owned_patient(patient_id: uuid.UUID, user: CurrentUser, db: DbSession) -> Patient:
+    """Resolve `{patient_id}` for the current user: the patient's family must be theirs.
+    Every route with `{patient_id}` in its path must depend on this (a test enforces it).
+
+    Missing access is a 404, identical to a nonexistent id.
+    """
+    patient = db.scalar(
+        select(Patient)
+        .join(Family, Family.id == Patient.family_id)
+        .where(Patient.id == patient_id, Family.owner_id == user.id)
     )
-    if row is None:
+    if patient is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Patient not found")
-    patient, role = row
-    return PatientAccess(patient=patient, role=role)
+    return patient
 
 
-PatientAccessDep = Annotated[PatientAccess, Depends(get_patient_access)]
-
-
-def require_owner(access: PatientAccessDep) -> PatientAccess:
-    if access.role != "owner":
-        raise HTTPException(
-            status.HTTP_403_FORBIDDEN, detail="Only an owner of this patient can do this"
-        )
-    return access
-
-
-OwnerAccess = Annotated[PatientAccess, Depends(require_owner)]
+OwnedPatient = Annotated[Patient, Depends(get_owned_patient)]

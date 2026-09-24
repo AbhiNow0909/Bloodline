@@ -17,12 +17,12 @@ from app.models import (
     EMBEDDING_DIMENSIONS,
     Base,
     CanonicalMetric,
+    Family,
     Metric,
     Patient,
     Report,
     ReportChunk,
     User,
-    UserPatientAccess,
 )
 from app.security import create_access_token
 
@@ -49,14 +49,28 @@ def build_user(**overrides: Any) -> User:
     return User(**(fields | overrides))
 
 
-def build_patient(**overrides: Any) -> Patient:
-    fields: dict[str, Any] = {"display_name": f"Test Patient {next(_sequence)}", "sex": "female"}
+def build_family(owner: User, **overrides: Any) -> Family:
+    fields: dict[str, Any] = {"owner_id": owner.id, "name": f"Test Family {next(_sequence)}"}
+    return Family(**(fields | overrides))
+
+
+def build_patient(family: Family, **overrides: Any) -> Patient:
+    fields: dict[str, Any] = {
+        "family_id": family.id,
+        "display_name": f"Test Patient {next(_sequence)}",
+        "sex": "female",
+    }
     return Patient(**(fields | overrides))
 
 
-def build_access(user: User, patient: Patient, **overrides: Any) -> UserPatientAccess:
-    fields: dict[str, Any] = {"user_id": user.id, "patient_id": patient.id, "role": "owner"}
-    return UserPatientAccess(**(fields | overrides))
+def add_family(session: Session, owner: User | None = None, **overrides: Any) -> Family:
+    """A persisted family, with a new owner unless one is given."""
+    return add(session, build_family(owner or add(session, build_user()), **overrides))
+
+
+def add_patient(session: Session, family: Family | None = None, **overrides: Any) -> Patient:
+    """A persisted family member, in a new family (with a new owner) unless one is given."""
+    return add(session, build_patient(family or add_family(session), **overrides))
 
 
 def build_report(patient: Patient, **overrides: Any) -> Report:

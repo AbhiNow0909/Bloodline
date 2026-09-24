@@ -11,20 +11,22 @@ from app.models import (
     EMBEDDING_DIMENSIONS,
     Base,
     CanonicalMetric,
+    Family,
     Metric,
     Patient,
     Report,
     ReportChunk,
     ReportFile,
     User,
-    UserPatientAccess,
 )
 from tests.db_helpers import violated_by_insert, violated_constraint
 from tests.factories import (
     add,
-    build_access,
+    add_family,
+    add_patient,
     build_canonical_metric,
     build_chunk,
+    build_family,
     build_metric,
     build_patient,
     build_report,
@@ -36,13 +38,13 @@ IST = timezone(timedelta(hours=5, minutes=30))
 
 
 def _report(session: Session) -> Report:
-    return add(session, build_report(add(session, build_patient())))
+    return add(session, build_report(add_patient(session)))
 
 
 def test_create_read_update_delete_round_trip(db_session: Session) -> None:
     user = add(db_session, build_user())
-    patient = add(db_session, build_patient(sex="male", date_of_birth=date(1970, 1, 1)))
-    add(db_session, build_access(user, patient, role="owner"))
+    family = add(db_session, build_family(user, name="Synthetic Family"))
+    patient = add(db_session, build_patient(family, sex="male", date_of_birth=date(1970, 1, 1)))
     marker = add(db_session, build_canonical_metric(aliases=["TM", "Test-M"]))
     report = add(
         db_session,
@@ -58,7 +60,9 @@ def test_create_read_update_delete_round_trip(db_session: Session) -> None:
     assert stored_report.status == "processing"  # server default
     assert stored_report.raw_extraction == {"tests": [{"n": 1}]}
     assert db_session.get_one(ReportFile, report.id).content == SYNTHETIC_PDF
-    assert db_session.get_one(UserPatientAccess, (user.id, patient.id)).role == "owner"
+    stored_family = db_session.get_one(Family, family.id)
+    assert (stored_family.owner_id, stored_family.name) == (user.id, "Synthetic Family")
+    assert db_session.get_one(Patient, patient.id).family_id == family.id
     assert db_session.get_one(CanonicalMetric, marker.id).aliases == ["TM", "Test-M"]
     stored_metric = db_session.get_one(Metric, metric.id)
     assert stored_metric.canonical_metric_id == marker.id
@@ -108,23 +112,19 @@ def test_embedding_must_have_384_dimensions(db_session: Session) -> None:
 
 CHECK_VIOLATIONS: dict[str, tuple[Callable[[Session], Base], str]] = {
     "sex outside male/female": (
-        lambda s: build_patient(sex="other"),
+        lambda s: build_patient(add_family(s), sex="other"),
         "ck_patients_sex_valid",
     ),
     "email not lowercase": (
         lambda s: build_user(email="Someone@Example.test"),
         "ck_users_email_lowercase",
     ),
-    "unknown access role": (
-        lambda s: build_access(add(s, build_user()), add(s, build_patient()), role="admin"),
-        "ck_user_patient_access_role_valid",
-    ),
     "unknown report status": (
-        lambda s: build_report(add(s, build_patient()), status="archived"),
+        lambda s: build_report(add_patient(s), status="archived"),
         "ck_reports_status_valid",
     ),
     "file hash not sha256 hex": (
-        lambda s: build_report(add(s, build_patient()), file_sha256="not-a-hash"),
+        lambda s: build_report(add_patient(s), file_sha256="not-a-hash"),
         "ck_reports_file_sha256_hex",
     ),
     "unknown metric flag": (
@@ -165,9 +165,20 @@ def test_email_is_unique(db_session: Session) -> None:
     assert constraint == "uq_users_email"
 
 
+def test_family_name_is_unique_per_owner(db_session: Session) -> None:
+    owner = add(db_session, build_user())
+    add(db_session, build_family(owner, name="Sharma Family"))
+
+    constraint = violated_by_insert(db_session, build_family(owner, name="Sharma Family"))
+    assert constraint == "uq_families_owner_id_name"
+
+    # Another user may use the same name for their own family.
+    add_family(db_session, name="Sharma Family")
+
+
 def test_duplicate_upload_is_detected_per_patient_only(db_session: Session) -> None:
-    patient = add(db_session, build_patient())
-    other_patient = add(db_session, build_patient())
+    patient = add_patient(db_session)
+    other_patient = add_patient(db_session)
     first = add(db_session, build_report(patient))
 
     constraint = violated_by_insert(
@@ -199,8 +210,8 @@ def test_chunk_index_is_unique_per_report(db_session: Session) -> None:
 
 
 def test_metric_cannot_point_at_another_patients_report(db_session: Session) -> None:
-    alice = add(db_session, build_patient())
-    bob = add(db_session, build_patient())
+    alice = add_patient(db_session)
+    bob = add_patient(db_session)
     alices_report = add(db_session, build_report(alice))
 
     constraint = violated_by_insert(db_session, build_metric(alices_report, patient_id=bob.id))
@@ -209,8 +220,8 @@ def test_metric_cannot_point_at_another_patients_report(db_session: Session) -> 
 
 
 def test_chunk_cannot_point_at_another_patients_report(db_session: Session) -> None:
-    alice = add(db_session, build_patient())
-    bob = add(db_session, build_patient())
+    alice = add_patient(db_session)
+    bob = add_patient(db_session)
     alices_report = add(db_session, build_report(alice))
 
     constraint = violated_by_insert(db_session, build_chunk(alices_report, patient_id=bob.id))
@@ -223,41 +234,66 @@ def _count(session: Session, model: type[Base], **filters: object) -> int:
     return session.scalar(query) or 0
 
 
+def _add_member_with_data(session: Session, family: Family) -> tuple[Patient, Report]:
+    patient = add(session, build_patient(family))
+    report = add(session, build_report(patient))
+    add(session, ReportFile(report_id=report.id, content=SYNTHETIC_PDF))
+    add(session, build_metric(report))
+    add(session, build_chunk(report))
+    return patient, report
+
+
+def _assert_member_data_gone(session: Session, patient: Patient, report: Report) -> None:
+    assert session.get(Patient, patient.id) is None
+    assert _count(session, Report, patient_id=patient.id) == 0
+    assert _count(session, ReportFile, report_id=report.id) == 0
+    assert _count(session, Metric, patient_id=patient.id) == 0
+    assert _count(session, ReportChunk, patient_id=patient.id) == 0
+
+
 def test_deleting_a_patient_removes_all_their_data(db_session: Session) -> None:
-    user = add(db_session, build_user())
-    patient = add(db_session, build_patient())
-    other_patient = add(db_session, build_patient())
-    add(db_session, build_access(user, patient))
-    report = add(db_session, build_report(patient))
-    add(db_session, ReportFile(report_id=report.id, content=SYNTHETIC_PDF))
-    add(db_session, build_metric(report))
-    add(db_session, build_chunk(report))
-    other_report = add(db_session, build_report(other_patient))
+    family = add_family(db_session)
+    patient, report = _add_member_with_data(db_session, family)
+    _, sibling_report = _add_member_with_data(db_session, family)
 
     db_session.delete(patient)
     db_session.flush()
     db_session.expunge_all()
 
-    assert _count(db_session, Report, patient_id=patient.id) == 0
-    assert _count(db_session, ReportFile, report_id=report.id) == 0
-    assert _count(db_session, Metric, patient_id=patient.id) == 0
-    assert _count(db_session, ReportChunk, patient_id=patient.id) == 0
-    assert _count(db_session, UserPatientAccess, patient_id=patient.id) == 0
-    assert db_session.get(User, user.id) is not None
+    _assert_member_data_gone(db_session, patient, report)
+    assert db_session.get(Family, family.id) is not None
+    assert db_session.get(Report, sibling_report.id) is not None
+
+
+def test_deleting_a_family_removes_its_members_and_their_data(db_session: Session) -> None:
+    owner = add(db_session, build_user())
+    family = add(db_session, build_family(owner))
+    other_family = add(db_session, build_family(owner))
+    patient, report = _add_member_with_data(db_session, family)
+    _, other_report = _add_member_with_data(db_session, other_family)
+
+    db_session.delete(family)
+    db_session.flush()
+    db_session.expunge_all()
+
+    _assert_member_data_gone(db_session, patient, report)
+    assert db_session.get(User, owner.id) is not None
     assert db_session.get(Report, other_report.id) is not None
 
 
-def test_deleting_a_user_keeps_the_patients(db_session: Session) -> None:
+def test_deleting_a_user_removes_their_families(db_session: Session) -> None:
     user = add(db_session, build_user())
-    patient = add(db_session, build_patient())
-    add(db_session, build_access(user, patient))
+    family = add(db_session, build_family(user))
+    patient, report = _add_member_with_data(db_session, family)
+    other_family = add_family(db_session)
 
     db_session.delete(user)
     db_session.flush()
     db_session.expunge_all()
 
-    assert _count(db_session, UserPatientAccess, user_id=user.id) == 0
-    assert db_session.get(Patient, patient.id) is not None
+    assert db_session.get(Family, family.id) is None
+    _assert_member_data_gone(db_session, patient, report)
+    assert db_session.get(Family, other_family.id) is not None
 
 
 def test_dictionary_entry_in_use_cannot_be_deleted(db_session: Session) -> None:

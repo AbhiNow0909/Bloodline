@@ -128,7 +128,7 @@ jobs:
           docker exec api python -m app.cli.seed
           docker exec api python -m app.cli.seed # idempotent: second run must succeed too
 
-      - name: Create a user with the CLI and log in through the API
+      - name: Create a user with the CLI, log in, and create a family and member
         run: |
           password="ci-smoke-test-password"
           echo "$password" | docker exec -i api python -m app.cli.create_user \
@@ -137,12 +137,20 @@ jobs:
             -H 'Content-Type: application/json' \
             -d "{\"email\": \"smoke@example.test\", \"password\": \"$password\"}" \
             | jq -r .access_token)"
-          curl --silent --show-error --fail http://localhost:8000/auth/me \
-            -H "Authorization: Bearer $token"
+          auth="Authorization: Bearer $token"
+          curl --silent --show-error --fail http://localhost:8000/auth/me -H "$auth"
+          echo
+          family_id="$(curl --silent --show-error --fail -X POST http://localhost:8000/families \
+            -H "$auth" -H 'Content-Type: application/json' -d '{"name": "CI Family"}' \
+            | jq -r .id)"
+          curl --silent --show-error --fail -X POST \
+            "http://localhost:8000/families/$family_id/patients" \
+            -H "$auth" -H 'Content-Type: application/json' \
+            -d '{"display_name": "CI Member", "sex": "female"}'
           echo
           code="$(curl --silent --output /dev/null --write-out '%{http_code}' \
-            http://localhost:8000/patients)"
-          if [ "$code" != "401" ]; then echo "::error::/patients without a token gave $code"; exit 1; fi
+            http://localhost:8000/families)"
+          if [ "$code" != "401" ]; then echo "::error::/families without a token gave $code"; exit 1; fi
 
       - name: API container logs
         if: always()
