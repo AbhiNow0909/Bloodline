@@ -407,7 +407,18 @@ Each phase ends with a manual commit by the user.
   - CI docker smoke now also creates a family and a member through the API inside the image, and checks unauthenticated `/families` is 401 (replayed locally end-to-end on an empty DB).
   - Context7 used (Alembic operations docs). Code review: no defects found; added an assertion for `patient_count` in the family list (a separate query path from the detail view).
   - Follow-ups: family names are unique per owner case-sensitively ("Sharma" and "sharma" can coexist) — fine for now. Concurrent creation of the same family name could hit the unique constraint as a 500 (pre-check covers normal use). Family overview endpoint → Phase 8; family navigation UI → Phase 9; family chat → Phases 13–14.
-- [ ] Phase 5 — PDF text extraction, header parsing, PII scrubbing
+- [x] Phase 5 — PDF text extraction, header parsing, PII scrubbing
+  - `app/services/extraction/`: `pdf_text.read_page_texts` (pdfplumber; `UnreadablePdfError` for non-PDFs and > 50 pages; **any** page without a text layer → `NoTextLayerError("scanned/image PDF not supported yet")`, never skipped, since it could hide results), `layout` (page kinds: results = has a `TEST NAME … VALUE … UNITS` line; conditions; other = cover/summary; `split_results_page` keeps only the table region and drops the identity header and the footer from `Report Remarks`), `header.parse_header` (regexes that stop at whole right-column labels because pdfplumber merges the two header columns into one line), `pii.scrub_text` / `find_leaks`, `pipeline.extract_report` → `ExtractedReport`.
+  - Layout learned from the user's real Thyrocare PDF in `samples/`, inspected only through masked views (identity letters → x/X, digits → 9); nothing from it is in code, fixtures or this file. Real report: 6 pages (cover, status summary, 3 results pages, Conditions of Reporting); header bracket codes `(SCT)/(SRT)/(RRT)` are field abbreviations, not time zones; times are Indian local time → parsed with a fixed +05:30 `IST` offset (no tzdata needed); the micro sign is U+00B5.
+  - `ExtractedReport`: lab name, earliest collection time, printed age/sex, per-page sample type + collected/received/released times, scrubbed text per page, dropped page numbers, warnings (e.g. pages for different patients). `llm_text()` = each page's scrubbed results prefixed with `Sample type: …`. The printed identity (names, referrers, barcodes) is kept on the backend only for scrubbing and the Phase 7 name-mismatch warning, and is `Field(exclude=True, repr=False)` so it never reaches `model_dump`/JSON/logs.
+  - Scrubbing = structural (header/footer dropped) + regex (emails, Indian mobiles incl. `+91` and `98765 43210`, barcodes, full printed names as phrases, name parts ≥ 3 chars, referring doctor, `Dr …` signatures). `extract_report` **fails closed** with `PiiLeakError` (kinds only, no values) if `find_leaks` still finds identity.
+  - Synthetic fixture `backend/tests/fixtures/synthetic_thyrocare_report.pdf`, generated deterministically by `tests/synthetic_pdf.py` (a ~40-line text-only PDF writer, Helvetica/cp1252 so µ renders — no PDF-authoring dependency); a test fails if the committed PDF drifts from the generator.
+  - Validated against the real report (masked output only): 3 results pages kept, header fields and IST times parsed, 0 of 22 header-only words present in the LLM text. Two bugs found and fixed this way / by tests: the fixture's guessed `(IST)` labels (real: SCT/SRT/RRT), and label matching that truncated names like "RAVI TEST" (a truncated name would escape scrubbing).
+  - Tests: 211 total (86 new): reader errors, page classification, header variants, label-like surnames, IST conversion, scrubber table (and results left untouched), end-to-end rows/ranges/units kept, every fake identity value absent, identity never serialized, different-patient warning, unsupported layout, fail-closed leak check.
+  - Dependencies: `pdfplumber` 0.11 (pulls `pdfminer.six`, `pypdfium2`, Pillow, and `cryptography`, which made PyJWT's key types strict — one Phase 4 test updated to use `""` as the `alg=none` key). Image 304 → 387 MB. PyMuPDF fallback **not** added: pdfplumber reads the real report fully and PyMuPDF is AGPL; add only if a real report needs it.
+  - CI docker job also extracts the synthetic report inside the built image (native deps check).
+  - Context7 used (pdfplumber API). Testing-strategy and code-review skills used; review added whole-phrase name scrubbing so short name parts (e.g. "LI") go when the full name appears.
+  - Follow-ups: **Phase 6** send `llm_text()` only; parse ranges like `Male:/Female:`, `Men:/Women:`, `Adults: Less than N`, units `µg/mL`, `µg/mg of Creatinine`. **Phase 7** store header fields (sample types, times, printed age/sex) on the report (migration or `raw_extraction`, never the identity) and compare `identity.names` with the member's display name for a mismatch warning. Known limits: only Thyrocare-style layouts (others → `UnsupportedLayoutError`); the `Report Remarks` footer is dropped entirely (lab remarks are not available to RAG yet); name parts shorter than 3 characters are scrubbed only as part of the full name.
 - [ ] Phase 6 — LLM structuring and normalization
 - [ ] Phase 7 — Upload, review and confirm API
 - [ ] Phase 8 — History and metrics API
@@ -421,7 +432,7 @@ Each phase ends with a manual commit by the user.
 - [ ] Phase 16 — Deployment (CD)
 - [ ] Phase 17 — Hardening and polish
 
-**Next step:** Phase 5 — PDF text extraction, header parsing, PII scrubbing (after the user commits Phase 4b and CI is green). The sample Thyrocare PDF is already in `samples/` (gitignored).
+**Next step:** Phase 6 — LLM structuring and normalization (after the user commits Phase 5 and CI is green). Needs a Groq API key in `.env` (`GROQ_API_KEY`) for the optional live test.
 
 ---
 
@@ -480,6 +491,12 @@ Use whatever is installed in this environment when it helps. Check what is avail
 | `user_patient_access` dropped; access = `patients.family_id → families.owner_id` | One source of truth for access; the viewer role had no use without sharing |
 | Keep the name `patients` in schema and API; UI says "family member" | Avoids renaming across models, migrations and every later phase's `/patients/{id}/...` routes |
 | Family overview + family chat, with members shown to the LLM only as labels ("Member A") | User's choice; keeps Principle 2 (no names to LLMs) while allowing cross-member questions |
+| *Made during Phase 5:* | |
+| Keep only each results page's table region; drop header and footer structurally, then regex-scrub, then fail closed on any leftover identity | Structure removes most identity reliably; regexes are the second line; failing is safer than sending |
+| Any page without a text layer fails the report (spec, Section 4.1) | A skipped scanned page could silently lose results |
+| Synthetic PDF fixture from a tiny deterministic writer in `tests/`, not a PDF library | No new dependency; exact control of layout; reproducible bytes checked by a test |
+| No PyMuPDF fallback yet | pdfplumber reads the real report fully; PyMuPDF is AGPL — add only when a real report needs it |
+| Report times parsed as fixed +05:30 IST | Thyrocare prints Indian local time; India has no DST; avoids a tzdata dependency |
 
 ### Deferred (revisit only if needed)
 - OCR fallback for scanned/photographed reports: Tesseract first, vision model only for low-confidence pages.

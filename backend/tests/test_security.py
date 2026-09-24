@@ -66,7 +66,7 @@ def test_token_lifetime_comes_from_settings() -> None:
 INVALID_TOKENS: dict[str, Callable[[], str]] = {
     "expired": lambda: create_access_token(USER_ID, now=datetime.now(UTC) - timedelta(days=2)),
     "wrong secret": lambda: _sign(_claims(), key="another-secret-that-is-long-enough-0123"),
-    "unsigned (alg none)": lambda: jwt.encode(_claims(), None, algorithm="none"),
+    "unsigned (alg none)": lambda: jwt.encode(_claims(), "", algorithm="none"),
     "other algorithm": lambda: _sign(_claims(), key="k" * 64, algorithm="HS512"),
     "tampered payload": _tampered,
     "missing exp": lambda: _sign(_without("exp")),

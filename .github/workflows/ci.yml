@@ -152,6 +152,17 @@ jobs:
             http://localhost:8000/families)"
           if [ "$code" != "401" ]; then echo "::error::/families without a token gave $code"; exit 1; fi
 
+      - name: Extract the synthetic report inside the image
+        run: |
+          docker exec -i api python -c "
+          import sys
+          from app.services.extraction import extract_report
+          report = extract_report(sys.stdin.buffer.read())
+          pages = [page.page_number for page in report.pages]
+          assert pages == [3, 4, 5], pages
+          print('extracted results pages', pages)
+          " < backend/tests/fixtures/synthetic_thyrocare_report.pdf
+
       - name: API container logs
         if: always()
         run: docker logs api || true
