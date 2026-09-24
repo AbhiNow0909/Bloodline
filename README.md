@@ -1,5 +1,7 @@
 # Bloodline
 
+[![CI](https://github.com/AbhiNow0909/Bloodline/actions/workflows/ci.yml/badge.svg)](https://github.com/AbhiNow0909/Bloodline/actions/workflows/ci.yml)
+
 Bloodline is a small web app for tracking a family's lab results over time.
 
 Upload a lab report PDF (blood or urine panel) and Bloodline extracts the values. You check
@@ -96,7 +98,8 @@ and the workflow files are added in later phases.
   curl -LsSf https://astral.sh/uv/install.sh | sh
   uv python install 3.12
   ```
-- **Node.js 22 LTS or newer** (for the frontend)
+- **Node.js 22 LTS or newer** (for the frontend), e.g. via [nvm](https://github.com/nvm-sh/nvm):
+  `nvm install --lts`
 - A free **Groq API key** (for the structuring and query features)
 
 ### Configuration
@@ -156,15 +159,20 @@ uv run mypy
 uv run pytest
 ```
 
-Without `uv` on your machine, the same checks run in the official uv image:
+If your shell exports `PYTHONPATH` (a ROS workspace does, for example), those packages
+come before the project's virtualenv and can break pytest. Clear it for this project's
+commands, e.g. `env -u PYTHONPATH uv run pytest`.
 
-```bash
-docker run --rm --network host -u "$(id -u):$(id -g)" -e HOME=/tmp \
-  -e UV_PROJECT_ENVIRONMENT=/tmp/venv \
-  -e DATABASE_URL=postgresql+psycopg://bloodline:bloodline@127.0.0.1:5432/bloodline \
-  -v "$PWD/backend":/app -w /app ghcr.io/astral-sh/uv:0.12.18-python3.12-trixie-slim \
-  sh -c 'uv sync --locked && uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest'
-```
+### Continuous integration
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push to `main`, every
+pull request, and on demand:
+
+- **Backend**: `uv sync --locked`, then ruff lint, ruff format check, mypy (strict) and pytest
+  against a `pgvector/pgvector:pg16` service container.
+- **Docker image**: builds `backend/Dockerfile` with layer caching, starts the image
+  against Postgres, checks that `/health` returns 200 and that the container is not running
+  as root.
 
 ## Privacy
 

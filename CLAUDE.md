@@ -55,7 +55,7 @@ Users: a handful of family members with manually created accounts. It is also a 
 | Embeddings | `BAAI/bge-small-en-v1.5` (384-dim), run locally | Prefer **`fastembed`** (ONNX, no PyTorch) to fit Render's memory limit; `sentence-transformers` is acceptable locally if memory is not an issue |
 | Background work | FastAPI `BackgroundTasks` | No worker service, no queue |
 | Auth | JWT (`pyjwt`) + Argon2 password hashing (`pwdlib[argon2]`) | Accounts created manually via a CLI script; no public sign-up |
-| Testing | `pytest`, `httpx` test client; `vitest` for frontend | Real Postgres service in CI |
+| Testing | `pytest`, `httpx2` test client; `vitest` for frontend | Real Postgres service in CI |
 | Lint / format | `ruff` (lint + format), `mypy` (backend); ESLint + Prettier (frontend) | |
 | Containers | Docker (multi-stage backend image) + Docker Compose for local dev | Compose runs `api` + `db` only |
 | CI/CD | GitHub Actions → GitHub Container Registry (GHCR) → Render deploy hook; Vercel via Git integration | |
@@ -329,10 +329,17 @@ Each phase ends with a manual commit by the user.
   - Compose: `db` (`pgvector/pgvector:pg16`, `pgdata` volume, `pg_isready` healthcheck) and `api` (waits for healthy db, `.env` optional, `DATABASE_URL` forced to the `db` service). Ports bound to 127.0.0.1.
   - Tests (4): health ok, health 503 against a real unreachable engine, CORS parsing, `DATABASE_URL` required.
   - `uv` is not installed on the host yet, so `uv.lock` and checks were run through `ghcr.io/astral-sh/uv:0.12.18-python3.12-trixie-slim` (command in README).
-  - Open question: Starlette 1.7's `TestClient` warns that `httpx` is deprecated in favour of `httpx2`; kept `httpx` (per Section 3) pending approval.
+  - Starlette 1.7's `TestClient` warned that `httpx` is deprecated in favour of `httpx2`; switched to `httpx2` in Phase 2 with user approval.
   - Phase 3 follow-up: tests that write data should use a dedicated test database, not the dev `bloodline` DB.
   - Phase 16 follow-up: Neon gives `postgresql://…?sslmode=require`; the scheme must be `postgresql+psycopg://`.
-- [ ] Phase 2 — Continuous integration
+- [x] Phase 2 — Continuous integration
+  - `.github/workflows/ci.yml` (push to `main`, pull requests, manual): `backend` job (setup-uv pinned to `0.12.18`, `uv sync --locked`, ruff lint with GitHub annotations, ruff format check, mypy, pytest against a `pgvector/pgvector:pg16` service) and `docker` job (buildx + GHA layer cache, then runs the image against a Postgres service and asserts `/health` = 200 and non-root uid). Jobs run in parallel.
+  - `permissions: contents: read`, `persist-credentials: false`, concurrency cancels superseded runs on the same ref. Actions pinned to major tags (checkout v7, setup-buildx v4, build-push v7), except `astral-sh/setup-uv`, which since v8 publishes only immutable exact releases (no `@vN` tags) and is pinned to the v10.2.0 commit SHA. The first push failed on `setup-uv@v10` for this reason; actionlint does not check that tags exist, so verify new action refs with `git ls-remote --tags`.
+  - Validated with actionlint 1.7.12 (includes shellcheck); both jobs' steps replayed locally and pass. Passing on GitHub is for the user to confirm after push.
+  - Dev test client switched `httpx` → `httpx2` (Starlette 1.7 deprecation); tests pass with `-W error::DeprecationWarning`.
+  - Dev machine: installed `uv` 0.12.18 + Python 3.12.14 (in `~/.local`) and nvm 0.40.8 + Node 24.21.0 LTS (in `~/.nvm`); created a local `.env` from `.env.example` with a generated `JWT_SECRET` (`GROQ_API_KEY` still empty).
+  - Dev machine quirk: `~/.bashrc` sources ROS Humble, which exports a Python 3.10 `PYTHONPATH` that breaks pytest plugin loading in the 3.12 venv. Run backend commands with `env -u PYTHONPATH` (documented in README). Does not affect CI or Docker.
+  - Follow-up (optional): Dependabot for `github-actions` + `uv` to keep action tags and the lockfile current.
 - [ ] Phase 3 — Database models and migrations
 - [ ] Phase 4 — Authentication and patients
 - [ ] Phase 5 — PDF text extraction, header parsing, PII scrubbing
@@ -349,7 +356,7 @@ Each phase ends with a manual commit by the user.
 - [ ] Phase 16 — Deployment (CD)
 - [ ] Phase 17 — Hardening and polish
 
-**Next step:** Phase 2 — Continuous integration (after the user commits Phase 1).
+**Next step:** Phase 3 — Database models and migrations (after the user commits Phase 2 and confirms CI is green).
 
 ---
 
@@ -382,6 +389,8 @@ Use whatever is installed in this environment when it helps. Check what is avail
 | Develop on Ubuntu | Native Docker, parity with CI runners and Linux containers |
 | Sync SQLAlchemy 2.x + psycopg 3 (not async) | Simpler code, Alembic and tests; `BackgroundTasks` runs sync work in a threadpool; pdfplumber/fastembed are blocking anyway; traffic is family-scale |
 | `/health` includes a DB round trip (503 on failure) | Phase 1 "done" criterion; makes a broken DB connection visible to Render's health check |
+| `httpx2` instead of `httpx` as the test client (dev only) | Starlette 1.7 deprecates `httpx` in `TestClient` and prefers `httpx2`; approved by the user in Phase 2 |
+| CI runs the built image against Postgres, not just `docker build` | Catches runtime-only image faults (venv interpreter path, missing deps, root user) that a build alone misses |
 
 ### Deferred (revisit only if needed)
 - OCR fallback for scanned/photographed reports: Tesseract first, vision model only for low-confidence pages.

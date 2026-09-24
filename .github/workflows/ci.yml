@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_VERSION: "0.12.18" # keep in sync with backend/Dockerfile
+  DATABASE_URL: postgresql+psycopg://bloodline:bloodline@localhost:5432/bloodline
+
+jobs:
+  backend:
+    name: Backend (lint, types, tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      db:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: bloodline
+          POSTGRES_PASSWORD: bloodline
+          POSTGRES_DB: bloodline
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U bloodline -d bloodline"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # setup-uv publishes no major tags since v8; pin the immutable release's commit.
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          working-directory: backend
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Ruff lint
+        run: uv run ruff check --output-format=github .
+
+      - name: Ruff format
+        run: uv run ruff format --check .
+
+      - name: Mypy
+        run: uv run mypy
+
+      - name: Pytest
+        run: uv run pytest
+
+  docker:
+    name: Docker image (build + smoke test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      db:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: bloodline
+          POSTGRES_PASSWORD: bloodline
+          POSTGRES_DB: bloodline
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U bloodline -d bloodline"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: backend
+          load: true
+          tags: bloodline-api:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test /health against Postgres
+        run: |
+          docker run --detach --name api --network host \
+            --env DATABASE_URL="$DATABASE_URL" bloodline-api:ci
+          curl --silent --show-error --fail --retry 15 --retry-delay 1 --retry-all-errors \
+            http://localhost:8000/health
+          echo
+          uid="$(docker exec api id -u)"
+          if [ "$uid" = "0" ]; then echo "::error::API container runs as root"; exit 1; fi
+
+      - name: API container logs
+        if: always()
+        run: docker logs api || true
