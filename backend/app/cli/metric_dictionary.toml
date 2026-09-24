@@ -1,0 +1,614 @@
+# Metric dictionary seed: the canonical biomarkers Bloodline recognizes.
+#
+# Load or update with:  python -m app.cli.seed
+# Re-running is safe: rows are upserted by canonical_name. This file is the source of truth
+# for category, unit, aliases, description and LOINC code. Removing an entry here does NOT
+# delete it from the database (stored metrics may reference it); retire it with a migration.
+#
+# Conventions
+# - canonical_unit uses ASCII: "u" for micro (uIU/mL, ug/dL), "10^3/uL" for counts, "ratio"
+#   for unitless ratios. Display formatting happens in the frontend.
+# - aliases are other names labs print for the same test. Matching is case-insensitive, and a
+#   name may belong to only one metric (the seed loader rejects duplicates).
+# - description says what the marker generally relates to. Never a diagnosis.
+# - loinc_code is left out unless verified against loinc.org. Never guessed.
+
+# ---------------------------------------------------------------------------
+# Complete Blood Count
+# ---------------------------------------------------------------------------
+
+[[metric]]
+canonical_name = "Haemoglobin"
+category = "Complete Blood Count"
+canonical_unit = "g/dL"
+aliases = ["Hemoglobin", "HGB", "Hb"]
+description = "Protein in red blood cells that carries oxygen."
+
+[[metric]]
+canonical_name = "Total Leucocyte Count"
+category = "Complete Blood Count"
+canonical_unit = "10^3/uL"
+aliases = ["TLC", "WBC", "WBC Count", "Total WBC Count", "Total Leukocyte Count", "White Blood Cell Count"]
+description = "Number of white blood cells, which are part of the immune system."
+
+[[metric]]
+canonical_name = "RBC Count"
+category = "Complete Blood Count"
+canonical_unit = "10^6/uL"
+aliases = ["RBC", "Total RBC", "Red Blood Cell Count"]
+description = "Number of red blood cells."
+
+[[metric]]
+canonical_name = "Haematocrit"
+category = "Complete Blood Count"
+canonical_unit = "%"
+aliases = ["Hematocrit", "HCT", "PCV", "Packed Cell Volume"]
+description = "Share of blood volume made up of red blood cells."
+
+[[metric]]
+canonical_name = "MCV"
+category = "Complete Blood Count"
+canonical_unit = "fL"
+aliases = ["Mean Corpuscular Volume"]
+description = "Average size of red blood cells."
+
+[[metric]]
+canonical_name = "MCH"
+category = "Complete Blood Count"
+canonical_unit = "pg"
+aliases = ["Mean Corpuscular Haemoglobin", "Mean Corpuscular Hemoglobin"]
+description = "Average amount of haemoglobin in each red blood cell."
+
+[[metric]]
+canonical_name = "MCHC"
+category = "Complete Blood Count"
+canonical_unit = "g/dL"
+aliases = ["Mean Corpuscular Haemoglobin Concentration", "Mean Corpuscular Hemoglobin Concentration"]
+description = "Average concentration of haemoglobin inside red blood cells."
+
+[[metric]]
+canonical_name = "RDW-CV"
+category = "Complete Blood Count"
+canonical_unit = "%"
+aliases = ["RDW", "Red Cell Distribution Width", "Red Cell Distribution Width - CV"]
+description = "Variation in red blood cell size, as a percentage."
+
+[[metric]]
+canonical_name = "RDW-SD"
+category = "Complete Blood Count"
+canonical_unit = "fL"
+aliases = ["Red Cell Distribution Width - SD"]
+description = "Variation in red blood cell size, as an absolute width."
+
+[[metric]]
+canonical_name = "Platelet Count"
+category = "Complete Blood Count"
+canonical_unit = "10^3/uL"
+aliases = ["PLT", "Platelets"]
+description = "Number of platelets, the cells involved in blood clotting."
+
+[[metric]]
+canonical_name = "MPV"
+category = "Complete Blood Count"
+canonical_unit = "fL"
+aliases = ["Mean Platelet Volume"]
+description = "Average size of platelets."
+
+[[metric]]
+canonical_name = "PDW"
+category = "Complete Blood Count"
+canonical_unit = "fL"
+aliases = ["Platelet Distribution Width"]
+description = "Variation in platelet size."
+
+[[metric]]
+canonical_name = "Plateletcrit"
+category = "Complete Blood Count"
+canonical_unit = "%"
+aliases = ["PCT"]
+description = "Share of blood volume made up of platelets."
+
+[[metric]]
+canonical_name = "P-LCR"
+category = "Complete Blood Count"
+canonical_unit = "%"
+aliases = ["Platelet Large Cell Ratio"]
+description = "Share of platelets that are larger than typical."
+
+[[metric]]
+canonical_name = "Neutrophils"
+category = "Complete Blood Count"
+canonical_unit = "%"
+aliases = ["Neutrophil"]
+description = "Share of white blood cells that are neutrophils, the most common type, involved in fighting infection."
+
+[[metric]]
+canonical_name = "Lymphocytes"
+category = "Complete Blood Count"
+canonical_unit = "%"
+aliases = ["Lymphocyte"]
+description = "Share of white blood cells that are lymphocytes, involved in immune responses."
+
+[[metric]]
+canonical_name = "Monocytes"
+category = "Complete Blood Count"
+canonical_unit = "%"
+aliases = ["Monocyte"]
+description = "Share of white blood cells that are monocytes, involved in clearing debris and fighting infection."
+
+[[metric]]
+canonical_name = "Eosinophils"
+category = "Complete Blood Count"
+canonical_unit = "%"
+aliases = ["Eosinophil"]
+description = "Share of white blood cells that are eosinophils, involved in allergic responses and fighting parasites."
+
+[[metric]]
+canonical_name = "Basophils"
+category = "Complete Blood Count"
+canonical_unit = "%"
+aliases = ["Basophil"]
+description = "Share of white blood cells that are basophils, involved in allergic and inflammatory responses."
+
+[[metric]]
+canonical_name = "Immature Granulocytes"
+category = "Complete Blood Count"
+canonical_unit = "%"
+aliases = ["IG", "Immature Granulocyte Percentage"]
+description = "Share of white blood cells that are immature granulocytes."
+
+[[metric]]
+canonical_name = "Absolute Neutrophil Count"
+category = "Complete Blood Count"
+canonical_unit = "10^3/uL"
+aliases = ["ANC", "Neutrophils - Absolute Count"]
+description = "Number of neutrophils per volume of blood."
+
+[[metric]]
+canonical_name = "Absolute Lymphocyte Count"
+category = "Complete Blood Count"
+canonical_unit = "10^3/uL"
+aliases = ["ALC", "Lymphocytes - Absolute Count"]
+description = "Number of lymphocytes per volume of blood."
+
+[[metric]]
+canonical_name = "Absolute Monocyte Count"
+category = "Complete Blood Count"
+canonical_unit = "10^3/uL"
+aliases = ["Monocytes - Absolute Count"]
+description = "Number of monocytes per volume of blood."
+
+[[metric]]
+canonical_name = "Absolute Eosinophil Count"
+category = "Complete Blood Count"
+canonical_unit = "10^3/uL"
+aliases = ["AEC", "Eosinophils - Absolute Count"]
+description = "Number of eosinophils per volume of blood."
+
+[[metric]]
+canonical_name = "Absolute Basophil Count"
+category = "Complete Blood Count"
+canonical_unit = "10^3/uL"
+aliases = ["Basophils - Absolute Count"]
+description = "Number of basophils per volume of blood."
+
+[[metric]]
+canonical_name = "Nucleated RBC"
+category = "Complete Blood Count"
+canonical_unit = "%"
+aliases = ["NRBC", "Nucleated Red Blood Cells"]
+description = "Immature red blood cells that still have a nucleus, relative to white blood cells."
+
+# ---------------------------------------------------------------------------
+# Lipid Profile
+# ---------------------------------------------------------------------------
+
+[[metric]]
+canonical_name = "Total Cholesterol"
+category = "Lipid Profile"
+canonical_unit = "mg/dL"
+aliases = ["Cholesterol", "Cholesterol - Total", "Serum Cholesterol"]
+description = "Total amount of cholesterol carried in the blood."
+
+[[metric]]
+canonical_name = "HDL Cholesterol"
+category = "Lipid Profile"
+canonical_unit = "mg/dL"
+aliases = ["HDL", "HDL-C", "HDL Cholesterol - Direct"]
+description = "Cholesterol carried by high-density lipoprotein, often called 'good' cholesterol."
+
+[[metric]]
+canonical_name = "LDL Cholesterol"
+category = "Lipid Profile"
+canonical_unit = "mg/dL"
+aliases = ["LDL", "LDL-C", "LDL Cholesterol - Direct"]
+description = "Cholesterol carried by low-density lipoprotein, often called 'bad' cholesterol."
+
+[[metric]]
+canonical_name = "Triglycerides"
+category = "Lipid Profile"
+canonical_unit = "mg/dL"
+aliases = ["TG", "Triglyceride"]
+description = "A type of fat in the blood, influenced by recent meals and diet."
+
+[[metric]]
+canonical_name = "VLDL Cholesterol"
+category = "Lipid Profile"
+canonical_unit = "mg/dL"
+aliases = ["VLDL"]
+description = "Cholesterol carried by very-low-density lipoprotein, which mainly transports triglycerides."
+
+[[metric]]
+canonical_name = "Non-HDL Cholesterol"
+category = "Lipid Profile"
+canonical_unit = "mg/dL"
+aliases = ["Non HDL Cholesterol", "Non-HDL-C"]
+description = "Total cholesterol minus HDL cholesterol."
+
+[[metric]]
+canonical_name = "Total Cholesterol/HDL Ratio"
+category = "Lipid Profile"
+canonical_unit = "ratio"
+aliases = ["TC/HDL Ratio", "TC/HDL Cholesterol Ratio", "Cholesterol/HDL Ratio"]
+description = "Total cholesterol divided by HDL cholesterol."
+
+[[metric]]
+canonical_name = "LDL/HDL Ratio"
+category = "Lipid Profile"
+canonical_unit = "ratio"
+aliases = ["LDL/HDL Cholesterol Ratio"]
+description = "LDL cholesterol divided by HDL cholesterol."
+
+[[metric]]
+canonical_name = "HDL/LDL Ratio"
+category = "Lipid Profile"
+canonical_unit = "ratio"
+aliases = ["HDL/LDL Cholesterol Ratio"]
+description = "HDL cholesterol divided by LDL cholesterol."
+
+[[metric]]
+canonical_name = "Triglycerides/HDL Ratio"
+category = "Lipid Profile"
+canonical_unit = "ratio"
+aliases = ["TRIG/HDL Ratio", "TG/HDL Ratio"]
+description = "Triglycerides divided by HDL cholesterol."
+
+# ---------------------------------------------------------------------------
+# Liver Function
+# ---------------------------------------------------------------------------
+
+[[metric]]
+canonical_name = "Total Bilirubin"
+category = "Liver Function"
+canonical_unit = "mg/dL"
+aliases = ["Bilirubin - Total", "Bilirubin Total", "Serum Bilirubin"]
+description = "Pigment produced when red blood cells break down; processed by the liver."
+
+[[metric]]
+canonical_name = "Direct Bilirubin"
+category = "Liver Function"
+canonical_unit = "mg/dL"
+aliases = ["Bilirubin - Direct", "Conjugated Bilirubin"]
+description = "Bilirubin that has already been processed (conjugated) by the liver."
+
+[[metric]]
+canonical_name = "Indirect Bilirubin"
+category = "Liver Function"
+canonical_unit = "mg/dL"
+aliases = ["Bilirubin - Indirect", "Unconjugated Bilirubin"]
+description = "Bilirubin not yet processed by the liver."
+
+[[metric]]
+canonical_name = "ALT"
+category = "Liver Function"
+canonical_unit = "U/L"
+aliases = ["SGPT", "ALT (SGPT)", "Alanine Aminotransferase", "Alanine Transaminase"]
+description = "Enzyme found mainly in the liver."
+
+[[metric]]
+canonical_name = "AST"
+category = "Liver Function"
+canonical_unit = "U/L"
+aliases = ["SGOT", "AST (SGOT)", "Aspartate Aminotransferase", "Aspartate Transaminase"]
+description = "Enzyme found in the liver, heart and muscles."
+
+[[metric]]
+canonical_name = "AST/ALT Ratio"
+category = "Liver Function"
+canonical_unit = "ratio"
+aliases = ["SGOT/SGPT Ratio"]
+description = "AST divided by ALT."
+
+[[metric]]
+canonical_name = "Alkaline Phosphatase"
+category = "Liver Function"
+canonical_unit = "U/L"
+aliases = ["ALP"]
+description = "Enzyme found mainly in the liver and bones."
+
+[[metric]]
+canonical_name = "GGT"
+category = "Liver Function"
+canonical_unit = "U/L"
+aliases = ["GGTP", "Gamma-GT", "Gamma Glutamyl Transferase"]
+description = "Enzyme found mainly in the liver and bile ducts."
+
+[[metric]]
+canonical_name = "Total Protein"
+category = "Liver Function"
+canonical_unit = "g/dL"
+aliases = ["Protein - Total", "Serum Total Protein"]
+description = "Total amount of albumin and globulin proteins in the blood."
+
+[[metric]]
+canonical_name = "Albumin"
+category = "Liver Function"
+canonical_unit = "g/dL"
+aliases = ["Albumin - Serum", "Serum Albumin"]
+description = "Main protein made by the liver; helps keep fluid inside blood vessels."
+
+[[metric]]
+canonical_name = "Globulin"
+category = "Liver Function"
+canonical_unit = "g/dL"
+aliases = ["Serum Globulin"]
+description = "Group of blood proteins that includes antibodies."
+
+[[metric]]
+canonical_name = "Albumin/Globulin Ratio"
+category = "Liver Function"
+canonical_unit = "ratio"
+aliases = ["A/G Ratio", "Serum Alb/Globulin Ratio"]
+description = "Albumin divided by globulin."
+
+# ---------------------------------------------------------------------------
+# Kidney Function
+# ---------------------------------------------------------------------------
+
+[[metric]]
+canonical_name = "Creatinine"
+category = "Kidney Function"
+canonical_unit = "mg/dL"
+aliases = ["Serum Creatinine", "Creatinine - Serum"]
+description = "Waste product from muscle activity, filtered out of the blood by the kidneys."
+
+[[metric]]
+canonical_name = "Blood Urea"
+category = "Kidney Function"
+canonical_unit = "mg/dL"
+aliases = ["Urea"]
+description = "Waste product from protein breakdown, filtered out of the blood by the kidneys."
+
+[[metric]]
+canonical_name = "Blood Urea Nitrogen"
+category = "Kidney Function"
+canonical_unit = "mg/dL"
+aliases = ["BUN", "Urea Nitrogen"]
+description = "The nitrogen portion of urea in the blood."
+
+[[metric]]
+canonical_name = "BUN/Creatinine Ratio"
+category = "Kidney Function"
+canonical_unit = "ratio"
+aliases = ["BUN/Sr.Creatinine Ratio", "BUN / Sr.Creatinine Ratio"]
+description = "Blood urea nitrogen divided by creatinine."
+
+[[metric]]
+canonical_name = "Urea/Creatinine Ratio"
+category = "Kidney Function"
+canonical_unit = "ratio"
+aliases = ["Urea/Sr.Creatinine Ratio", "Urea / Sr.Creatinine Ratio"]
+description = "Blood urea divided by creatinine."
+
+[[metric]]
+canonical_name = "Uric Acid"
+category = "Kidney Function"
+canonical_unit = "mg/dL"
+aliases = ["Serum Uric Acid"]
+description = "Waste product from the breakdown of purines, which come from some foods and the body's own cells."
+
+[[metric]]
+canonical_name = "eGFR"
+category = "Kidney Function"
+canonical_unit = "mL/min/1.73m2"
+aliases = ["Estimated Glomerular Filtration Rate"]
+description = "Estimate of how much blood the kidneys filter per minute, calculated from creatinine."
+
+[[metric]]
+canonical_name = "Calcium"
+category = "Kidney Function"
+canonical_unit = "mg/dL"
+aliases = ["Serum Calcium", "Total Calcium"]
+description = "Mineral important for bones, muscles and nerves."
+
+# ---------------------------------------------------------------------------
+# Electrolytes
+# ---------------------------------------------------------------------------
+
+[[metric]]
+canonical_name = "Sodium"
+category = "Electrolytes"
+canonical_unit = "mmol/L"
+aliases = ["Na", "Serum Sodium"]
+description = "Electrolyte that helps control fluid balance and nerve function."
+
+[[metric]]
+canonical_name = "Potassium"
+category = "Electrolytes"
+canonical_unit = "mmol/L"
+aliases = ["K", "Serum Potassium"]
+description = "Electrolyte important for heart and muscle function."
+
+[[metric]]
+canonical_name = "Chloride"
+category = "Electrolytes"
+canonical_unit = "mmol/L"
+aliases = ["Cl", "Serum Chloride"]
+description = "Electrolyte that works with sodium to maintain fluid balance."
+
+# ---------------------------------------------------------------------------
+# Thyroid
+# ---------------------------------------------------------------------------
+
+[[metric]]
+canonical_name = "TSH"
+category = "Thyroid"
+canonical_unit = "uIU/mL"
+aliases = ["Thyroid Stimulating Hormone", "TSH - Ultrasensitive", "TSH Ultrasensitive"]
+description = "Pituitary hormone that signals the thyroid gland to make thyroid hormones."
+
+[[metric]]
+canonical_name = "Total T3"
+category = "Thyroid"
+canonical_unit = "ng/dL"
+aliases = ["T3", "Total Triiodothyronine", "Triiodothyronine (T3)"]
+description = "Total amount of triiodothyronine, an active thyroid hormone."
+
+[[metric]]
+canonical_name = "Total T4"
+category = "Thyroid"
+canonical_unit = "ug/dL"
+aliases = ["T4", "Total Thyroxine", "Thyroxine (T4)"]
+description = "Total amount of thyroxine, the main hormone made by the thyroid."
+
+[[metric]]
+canonical_name = "Free T3"
+category = "Thyroid"
+canonical_unit = "pg/mL"
+aliases = ["FT3", "Free Triiodothyronine"]
+description = "The unbound, active form of triiodothyronine."
+
+[[metric]]
+canonical_name = "Free T4"
+category = "Thyroid"
+canonical_unit = "ng/dL"
+aliases = ["FT4", "Free Thyroxine"]
+description = "The unbound, active form of thyroxine."
+
+# ---------------------------------------------------------------------------
+# Diabetes
+# ---------------------------------------------------------------------------
+
+[[metric]]
+canonical_name = "HbA1c"
+category = "Diabetes"
+canonical_unit = "%"
+aliases = ["A1c", "Glycated Haemoglobin", "Glycated Hemoglobin", "Glycosylated Haemoglobin", "Glycosylated Hemoglobin"]
+description = "Reflects average blood glucose over roughly the past two to three months."
+
+[[metric]]
+canonical_name = "Estimated Average Glucose"
+category = "Diabetes"
+canonical_unit = "mg/dL"
+aliases = ["eAG", "ABG", "Average Blood Glucose"]
+description = "Average blood glucose estimated from HbA1c."
+
+[[metric]]
+canonical_name = "Fasting Blood Glucose"
+category = "Diabetes"
+canonical_unit = "mg/dL"
+aliases = ["FBS", "FPG", "Fasting Blood Sugar", "Fasting Plasma Glucose", "Glucose - Fasting"]
+description = "Blood glucose measured after an overnight fast."
+
+[[metric]]
+canonical_name = "Postprandial Blood Glucose"
+category = "Diabetes"
+canonical_unit = "mg/dL"
+aliases = ["PPBS", "PPBG", "Post Prandial Blood Sugar", "Glucose - Postprandial"]
+description = "Blood glucose measured about two hours after a meal."
+
+[[metric]]
+canonical_name = "Random Blood Glucose"
+category = "Diabetes"
+canonical_unit = "mg/dL"
+aliases = ["RBS", "Random Blood Sugar"]
+description = "Blood glucose measured at any time, regardless of meals."
+
+# ---------------------------------------------------------------------------
+# Iron Studies
+# ---------------------------------------------------------------------------
+
+[[metric]]
+canonical_name = "Serum Iron"
+category = "Iron Studies"
+canonical_unit = "ug/dL"
+aliases = ["Iron"]
+description = "Amount of iron circulating in the blood."
+
+[[metric]]
+canonical_name = "TIBC"
+category = "Iron Studies"
+canonical_unit = "ug/dL"
+aliases = ["Total Iron Binding Capacity"]
+description = "How much iron the blood's transport proteins can carry."
+
+[[metric]]
+canonical_name = "UIBC"
+category = "Iron Studies"
+canonical_unit = "ug/dL"
+aliases = ["Unsaturated Iron Binding Capacity"]
+description = "The part of the blood's iron-carrying capacity not currently in use."
+
+[[metric]]
+canonical_name = "Transferrin Saturation"
+category = "Iron Studies"
+canonical_unit = "%"
+aliases = ["TSAT", "% Transferrin Saturation", "Iron Saturation"]
+description = "Share of the blood's iron-carrying capacity that is filled with iron."
+
+[[metric]]
+canonical_name = "Ferritin"
+category = "Iron Studies"
+canonical_unit = "ng/mL"
+aliases = ["Serum Ferritin"]
+description = "Protein that stores iron; reflects the body's iron stores."
+
+# ---------------------------------------------------------------------------
+# Vitamins
+# ---------------------------------------------------------------------------
+
+[[metric]]
+canonical_name = "Vitamin D (25-OH)"
+category = "Vitamins"
+canonical_unit = "ng/mL"
+aliases = ["Vitamin D", "Vitamin D Total", "25-OH Vitamin D", "25(OH) Vitamin D", "25-Hydroxy Vitamin D"]
+description = "Main circulating form of vitamin D, important for bones and calcium balance."
+
+[[metric]]
+canonical_name = "Vitamin B12"
+category = "Vitamins"
+canonical_unit = "pg/mL"
+aliases = ["B12", "Cobalamin", "Cyanocobalamin"]
+description = "Vitamin needed for nerve function and making red blood cells."
+
+[[metric]]
+canonical_name = "Folate"
+category = "Vitamins"
+canonical_unit = "ng/mL"
+aliases = ["Folic Acid", "Serum Folate", "Vitamin B9"]
+description = "B vitamin needed to make DNA and red blood cells."
+
+# ---------------------------------------------------------------------------
+# Urine
+# ---------------------------------------------------------------------------
+
+[[metric]]
+canonical_name = "Urine Microalbumin"
+category = "Urine"
+canonical_unit = "mg/L"
+aliases = ["Microalbumin", "Urine Albumin", "Urinary Microalbumin"]
+description = "Small amounts of albumin in urine; healthy kidneys keep most albumin in the blood."
+
+[[metric]]
+canonical_name = "Urine Creatinine"
+category = "Urine"
+canonical_unit = "mg/dL"
+aliases = ["Creatinine - Urine", "Urinary Creatinine"]
+description = "Creatinine in urine, used to adjust other urine measurements for how concentrated the urine is."
+
+[[metric]]
+canonical_name = "Urine Albumin/Creatinine Ratio"
+category = "Urine"
+canonical_unit = "mg/g"
+aliases = ["UACR", "ACR", "Albumin Creatinine Ratio", "Urinary Albumin/Creatinine Ratio", "Uri. Albumin/Creatinine Ratio"]
+description = "Urine albumin adjusted for how concentrated the urine is."

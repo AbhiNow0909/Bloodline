@@ -126,11 +126,31 @@ curl http://localhost:8000/health
 - The container is built from the same `backend/Dockerfile` that runs on Render. After code
   changes, run `docker compose up --build` again.
 
-### Migrations and seed data *(available from Phase 3)*
+### Migrations and seed data
+
+After the first `docker compose up`, create the schema and load the metric dictionary:
 
 ```bash
-docker compose exec api alembic upgrade head
+docker compose exec api alembic upgrade head      # creates tables and the pgvector extension
+docker compose exec api python -m app.cli.seed    # loads/updates ~80 biomarker definitions
 ```
+
+Both commands are safe to re-run. The seed reads
+[`backend/app/cli/metric_dictionary.toml`](backend/app/cli/metric_dictionary.toml), where
+each metric has a canonical name, category, unit, description and the aliases labs print
+for it. To add a biomarker or alias, edit that file and run the seed again.
+
+To change the schema, edit the models in `backend/app/models/`, then generate a migration
+against the local database (at head) and review it before committing:
+
+```bash
+cd backend
+uv run alembic revision --autogenerate -m "describe the change"
+uv run alembic upgrade head
+```
+
+Autogenerate does not detect changes to CHECK constraints (e.g. adding a new report
+status). Write those migration steps by hand.
 
 ### Creating a user *(available from Phase 4)*
 
@@ -148,7 +168,9 @@ npm run dev                      # http://localhost:5173
 ### Tests and checks
 
 Tests run against a real Postgres, so start the database first. They read `DATABASE_URL`
-from the environment or from the repo-root `.env`.
+from the environment or from the repo-root `.env`, but never use that database directly:
+each run recreates a separate `<name>_test` database (e.g. `bloodline_test`), migrates it,
+and rolls back every test's changes, so your development data is never touched.
 
 ```bash
 docker compose up -d db
@@ -159,10 +181,6 @@ uv run mypy
 uv run pytest
 ```
 
-If your shell exports `PYTHONPATH` (a ROS workspace does, for example), those packages
-come before the project's virtualenv and can break pytest. Clear it for this project's
-commands, e.g. `env -u PYTHONPATH uv run pytest`.
-
 ### Continuous integration
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push to `main`, every
@@ -172,7 +190,8 @@ pull request, and on demand:
   against a `pgvector/pgvector:pg16` service container.
 - **Docker image**: builds `backend/Dockerfile` with layer caching, starts the image
   against Postgres, checks that `/health` returns 200 and that the container is not running
-  as root.
+  as root, then migrates and seeds the empty database from inside the image (twice for the
+  seed, to prove it is idempotent).
 
 ## Privacy
 

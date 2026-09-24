@@ -109,6 +109,13 @@ jobs:
           uid="$(docker exec api id -u)"
           if [ "$uid" = "0" ]; then echo "::error::API container runs as root"; exit 1; fi
 
+      - name: Migrate and seed an empty database from the image
+        run: |
+          docker exec api alembic upgrade head
+          docker exec api alembic check
+          docker exec api python -m app.cli.seed
+          docker exec api python -m app.cli.seed # idempotent: second run must succeed too
+
       - name: API container logs
         if: always()
         run: docker logs api || true
