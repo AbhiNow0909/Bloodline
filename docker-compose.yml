@@ -1,0 +1,36 @@
+name: bloodline
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      # Local development credentials only; production uses Neon.
+      POSTGRES_USER: bloodline
+      POSTGRES_PASSWORD: bloodline
+      POSTGRES_DB: bloodline
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bloodline -d bloodline"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: ./backend
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # Always talk to the compose `db` service, even if .env points elsewhere.
+      DATABASE_URL: postgresql+psycopg://bloodline:bloodline@db:5432/bloodline
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

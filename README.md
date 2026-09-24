@@ -83,7 +83,7 @@ React SPA (Vercel) ──HTTPS + JWT──▶ FastAPI (Docker on Render)
 └── .github/workflows/      # CI and deployment
 ```
 
-`docker-compose.yml`, `backend/Dockerfile`, `backend/pyproject.toml`, `frontend/package.json`
+`docker-compose.yml` (repo root) runs `api` + `db` for local development. `frontend/package.json`
 and the workflow files are added in later phases.
 
 ## Local development
@@ -108,12 +108,20 @@ cp .env.example .env
 
 See `.env.example` for all variables.
 
-### Backend and database *(available from Phase 1)*
+### Backend and database
 
 ```bash
-docker compose up --build        # starts `api` (FastAPI) and `db` (Postgres + pgvector)
+docker compose up --build        # starts `api` (FastAPI) and `db` (Postgres 16 + pgvector)
 curl http://localhost:8000/health
+# {"status":"ok","database":"ok"}  (HTTP 503 with "unreachable" if the DB is down)
 ```
+
+- API: <http://localhost:8000>, interactive docs at <http://localhost:8000/docs>
+- Postgres: `localhost:5432`, user/password/database `bloodline` (local only), data kept in
+  the `pgdata` volume. `docker compose down -v` wipes it.
+- Both ports are bound to `127.0.0.1`, so nothing is exposed to your network.
+- The container is built from the same `backend/Dockerfile` that runs on Render. After code
+  changes, run `docker compose up --build` again.
 
 ### Migrations and seed data *(available from Phase 3)*
 
@@ -134,13 +142,28 @@ npm install
 npm run dev                      # http://localhost:5173
 ```
 
-### Tests and checks *(available from Phase 1/2)*
+### Tests and checks
+
+Tests run against a real Postgres, so start the database first. They read `DATABASE_URL`
+from the environment or from the repo-root `.env`.
 
 ```bash
+docker compose up -d db
 cd backend
+uv sync                          # creates backend/.venv with dev dependencies
 uv run ruff check . && uv run ruff format --check .
-uv run mypy .
-uv run pytest                    # integration tests need the Postgres container running
+uv run mypy
+uv run pytest
+```
+
+Without `uv` on your machine, the same checks run in the official uv image:
+
+```bash
+docker run --rm --network host -u "$(id -u):$(id -g)" -e HOME=/tmp \
+  -e UV_PROJECT_ENVIRONMENT=/tmp/venv \
+  -e DATABASE_URL=postgresql+psycopg://bloodline:bloodline@127.0.0.1:5432/bloodline \
+  -v "$PWD/backend":/app -w /app ghcr.io/astral-sh/uv:0.12.18-python3.12-trixie-slim \
+  sh -c 'uv sync --locked && uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest'
 ```
 
 ## Privacy

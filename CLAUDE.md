@@ -321,7 +321,17 @@ Each phase ends with a manual commit by the user.
   - `backend/tests/fixtures/README.md` states the synthetic-only rule.
   - Phase 3: delete `backend/alembic/.gitkeep` before `alembic init` (it refuses a non-empty dir). Phase 9: delete `frontend/src/.gitkeep` before scaffolding Vite.
   - Local tooling at time of Phase 0: Docker 29.8 + Compose v5.5 present; `uv`, Python 3.12 and Node not yet installed (needed from Phase 1 / Phase 9).
-- [ ] Phase 1 — Backend skeleton + Docker
+- [x] Phase 1 — Backend skeleton + Docker
+  - FastAPI app factory (`app/main.py`), settings (`app/config.py`, `DATABASE_URL` required, repo-root `.env` read for local runs), sync SQLAlchemy engine + `get_db` session dependency (`app/db.py`), CORS from `CORS_ORIGINS`.
+  - `GET /health` runs `SELECT 1`: 200 `{"status":"ok","database":"ok"}`, or 503 `{"status":"error","database":"unreachable"}`. Verified end-to-end, including recovery after a DB restart (`pool_pre_ping`).
+  - uv project without a build backend (app is not installed as a package; `pythonpath = ["."]` for pytest). Dev deps in `[dependency-groups] dev`. Ruff (line 100, E/W/F/I/N/B/UP/SIM/C4/S/PT/RUF), mypy `strict` + pydantic plugin.
+  - Dockerfile follows uv's official multistage example: `python:3.12-slim-trixie` in both stages, uv pinned `0.12.18`, deps layer cached, code owned by root and run as uid 999 `app`, `${PORT:-8000}` for Render. Image ~296 MB.
+  - Compose: `db` (`pgvector/pgvector:pg16`, `pgdata` volume, `pg_isready` healthcheck) and `api` (waits for healthy db, `.env` optional, `DATABASE_URL` forced to the `db` service). Ports bound to 127.0.0.1.
+  - Tests (4): health ok, health 503 against a real unreachable engine, CORS parsing, `DATABASE_URL` required.
+  - `uv` is not installed on the host yet, so `uv.lock` and checks were run through `ghcr.io/astral-sh/uv:0.12.18-python3.12-trixie-slim` (command in README).
+  - Open question: Starlette 1.7's `TestClient` warns that `httpx` is deprecated in favour of `httpx2`; kept `httpx` (per Section 3) pending approval.
+  - Phase 3 follow-up: tests that write data should use a dedicated test database, not the dev `bloodline` DB.
+  - Phase 16 follow-up: Neon gives `postgresql://…?sslmode=require`; the scheme must be `postgresql+psycopg://`.
 - [ ] Phase 2 — Continuous integration
 - [ ] Phase 3 — Database models and migrations
 - [ ] Phase 4 — Authentication and patients
@@ -339,7 +349,7 @@ Each phase ends with a manual commit by the user.
 - [ ] Phase 16 — Deployment (CD)
 - [ ] Phase 17 — Hardening and polish
 
-**Next step:** Phase 1 — Backend skeleton + Docker (after the user commits Phase 0).
+**Next step:** Phase 2 — Continuous integration (after the user commits Phase 1).
 
 ---
 
@@ -370,6 +380,8 @@ Use whatever is installed in this environment when it helps. Check what is avail
 | Flag + explain, never diagnose | Lab values alone lack clinical context; honest and safer framing |
 | Manual commits per phase | User reviews and commits every feature themselves |
 | Develop on Ubuntu | Native Docker, parity with CI runners and Linux containers |
+| Sync SQLAlchemy 2.x + psycopg 3 (not async) | Simpler code, Alembic and tests; `BackgroundTasks` runs sync work in a threadpool; pdfplumber/fastembed are blocking anyway; traffic is family-scale |
+| `/health` includes a DB round trip (503 on failure) | Phase 1 "done" criterion; makes a broken DB connection visible to Render's health check |
 
 ### Deferred (revisit only if needed)
 - OCR fallback for scanned/photographed reports: Tesseract first, vision model only for low-confidence pages.
