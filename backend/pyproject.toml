@@ -8,8 +8,10 @@ dependencies = [
     "fastapi>=0.141.1",
     "pgvector>=0.5.0",
     "psycopg[binary]>=3.3.6",
+    "pwdlib[argon2]>=0.3.1",
     "pydantic>=2.13.5",
     "pydantic-settings>=2.15.0",
+    "pyjwt>=2.15.0",
     "sqlalchemy>=2.0.54",
     "uvicorn[standard]>=0.53.0",
 ]
@@ -46,7 +48,11 @@ select = [
 known-third-party = ["alembic"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101"] # assert is how pytest works
+"tests/**" = [
+    "S101", # assert is how pytest works
+    "S105", # fake passwords/tokens in test fixtures are intentional
+    "S106",
+]
 
 [tool.mypy]
 python_version = "3.12"
@@ -63,3 +69,5 @@ warn_required_dynamic_aliases = true
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = ["-ra", "--strict-markers", "--strict-config"]
+# Surface deprecations (ours and our dependencies') as failures, locally and in CI.
+filterwarnings = ["error::DeprecationWarning"]

@@ -50,6 +50,12 @@ jobs:
           version: ${{ env.UV_VERSION }}
           working-directory: backend
 
+      - name: Generate a throwaway JWT secret
+        run: |
+          secret="$(openssl rand -hex 32)"
+          echo "::add-mask::$secret"
+          echo "JWT_SECRET=$secret" >> "$GITHUB_ENV"
+
       - name: Install dependencies
         run: uv sync --locked
 
@@ -88,6 +94,12 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Generate a throwaway JWT secret
+        run: |
+          secret="$(openssl rand -hex 32)"
+          echo "::add-mask::$secret"
+          echo "JWT_SECRET=$secret" >> "$GITHUB_ENV"
+
       - uses: docker/setup-buildx-action@v4
 
       - name: Build image
@@ -102,7 +114,7 @@ jobs:
       - name: Smoke test /health against Postgres
         run: |
           docker run --detach --name api --network host \
-            --env DATABASE_URL="$DATABASE_URL" bloodline-api:ci
+            --env DATABASE_URL="$DATABASE_URL" --env JWT_SECRET="$JWT_SECRET" bloodline-api:ci
           curl --silent --show-error --fail --retry 15 --retry-delay 1 --retry-all-errors \
             http://localhost:8000/health
           echo
@@ -115,6 +127,22 @@ jobs:
           docker exec api alembic check
           docker exec api python -m app.cli.seed
           docker exec api python -m app.cli.seed # idempotent: second run must succeed too
+
+      - name: Create a user with the CLI and log in through the API
+        run: |
+          password="ci-smoke-test-password"
+          echo "$password" | docker exec -i api python -m app.cli.create_user \
+            --email smoke@example.test --name "CI Smoke" --password-stdin
+          token="$(curl --silent --show-error --fail -X POST http://localhost:8000/auth/login \
+            -H 'Content-Type: application/json' \
+            -d "{\"email\": \"smoke@example.test\", \"password\": \"$password\"}" \
+            | jq -r .access_token)"
+          curl --silent --show-error --fail http://localhost:8000/auth/me \
+            -H "Authorization: Bearer $token"
+          echo
+          code="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            http://localhost:8000/patients)"
+          if [ "$code" != "401" ]; then echo "::error::/patients without a token gave $code"; exit 1; fi
 
       - name: API container logs
         if: always()

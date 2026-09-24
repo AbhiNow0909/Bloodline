@@ -352,7 +352,21 @@ Each phase ends with a manual commit by the user.
   - Code review (engineering:code-review) findings, all fixed: drift test was blind to server-default changes (enabled `compare_server_default`); test fixture could create/drop a DB on a remote server (local-host guard, exits with code 2); seed-removal semantics undocumented.
   - Known limitation: Alembic autogenerate never detects `CHECK` constraint changes — write those migrations by hand (noted in README).
   - Follow-ups: **Phase 4** normalize emails (strip + lower) before insert; keep at least one `owner` per patient in app logic. **Phase 5** parse printed times as Asia/Kolkata before storing `timestamptz`; Section 4.1 step 3 fields not in 4.2 (sample type, printed age/sex) need columns via migration or go in `raw_extraction`. **Phase 6** match aliases on normalized exact names (short aliases like `K`, `Na`, `ABG`, `PCT` must never substring-match); `raw_extraction` must contain only scrubbed data. **Phase 7** `metrics.collected_at` is NOT NULL, so confirm must supply a date. **Phase 12** filtered HNSW search can return < k rows; consider pgvector 0.8 `hnsw.iterative_scan` or rely on the `patient_id` index at family scale.
-- [ ] Phase 4 — Authentication and patients
+- [x] Phase 4 — Authentication and patients
+  - `app/security.py`: Argon2id via `pwdlib` (`PasswordHash.recommended()`: m=64 MiB, t=3, p=4, ~55 ms), `verify_and_update` upgrades outdated hashes on login; HS256 JWTs via a strict `jwt.PyJWT(options={"enforce_minimum_key_length": True})`, claims `sub`/`iat`/`exp` all required, `algorithms=["HS256"]` only.
+  - `app/services/users.py`: email normalization (strip + lower), password 12–1024 chars, `create_user`, `authenticate` (unknown email burns one Argon2 verify so timing and response match a wrong password; an unreadable stored hash also counts as a mismatch).
+  - `app/api/deps.py`: `DbSession`, `CurrentUser` (`HTTPBearer(auto_error=False)`, 401 + `WWW-Authenticate: Bearer`, deleted users rejected), `get_patient_access` (**404** when the user has no access, identical to a nonexistent id), `require_owner` (403 for viewers).
+  - Routes: `POST /auth/login` (JSON body, not OAuth2 form, so no `python-multipart` yet), `GET /auth/me`, `GET/POST /patients`, `GET/PATCH/DELETE /patients/{patient_id}` (creator becomes owner; PATCH/DELETE owner-only; DELETE cascades all data).
+  - `app/api/errors.py`: 422 responses drop the submitted `input` (FastAPI's default echoes it — would reflect passwords and patient names).
+  - CLI `python -m app.cli.create_user --email … --name …` (prompts twice or `--password-stdin`; never an argument).
+  - Settings: `JWT_SECRET` required, `SecretStr`, ≥ 32 chars; `JWT_EXPIRE_MINUTES` default 1440.
+  - FastAPI 0.141 keeps included routers nested (`app.routes` holds `_IncludedRouter`s); walk routes with `fastapi.routing.iter_route_contexts(app.routes)`. A test uses it to assert every `{patient_id}` route depends on `get_patient_access` (verified to catch a deliberately unprotected route).
+  - pytest config now sets `filterwarnings = ["error::DeprecationWarning"]` (it caught SQLAlchemy's deprecated `Row.tuple()`).
+  - Tests: 104 total — token edge cases (expired, wrong secret, `alg=none`, other algorithm, tampered payload, missing claims, non-UUID subject), login/enumeration parity, 401/404/403 access matrix, viewer read-only, validation, no-echo of inputs, CLI via stdin/prompt/errors.
+  - CI: each job generates a masked throwaway `JWT_SECRET`; the docker job also creates a user with the CLI inside the image, logs in over HTTP, calls `/auth/me`, and checks unauthenticated `/patients` is 401 (replayed locally end-to-end).
+  - Code review (engineering:code-review) findings, both fixed: 422 bodies echoed submitted values (password reflected); a malformed stored hash raised `UnknownHashError` → 500, distinguishable from 401.
+  - Context7 still not loaded in this session (needs a Claude Code restart); docs were checked against upstream sources (pwdlib README, PyJWT usage + changelog, FastAPI release notes).
+  - Follow-ups: **Sharing** — no way yet to grant another user `viewer`/`owner` access (decide: CLI or UI). **Phase 17** — login rate limiting; token revocation (tokens stay valid until expiry, and there is no password-change endpoint yet). Minor: `create_user` CLI shows a traceback if two runs race on the same email (unique constraint still holds). Optional: a compose healthcheck for `api` so `docker compose up --wait` means "serving", not just "started".
 - [ ] Phase 5 — PDF text extraction, header parsing, PII scrubbing
 - [ ] Phase 6 — LLM structuring and normalization
 - [ ] Phase 7 — Upload, review and confirm API
@@ -367,7 +381,7 @@ Each phase ends with a manual commit by the user.
 - [ ] Phase 16 — Deployment (CD)
 - [ ] Phase 17 — Hardening and polish
 
-**Next step:** Phase 4 — Authentication and patients (after the user commits Phase 3 and CI is green).
+**Next step:** Phase 5 — PDF text extraction, header parsing, PII scrubbing (after the user commits Phase 4 and CI is green). Phase 5 needs a real Thyrocare PDF in `samples/` (gitignored) to model the synthetic fixture on.
 
 ---
 
@@ -415,6 +429,11 @@ Use whatever is installed in this environment when it helps. Check what is avail
 | Composite FK `(report_id, patient_id) → reports(id, patient_id)` on `metrics` and `report_chunks` | Privacy by design at the lowest layer: the DB itself refuses cross-patient links |
 | Metric dictionary seed lives in `app/cli/metric_dictionary.toml` (stdlib `tomllib`, Pydantic-validated) | Comments allowed, no new dependency, ships inside the Docker image |
 | Test suite refuses to run against non-local DB hosts | Tests create/drop a `_test` database; they must never do that on Neon |
+| *Made during Phase 4:* | |
+| JSON login + `Authorization: Bearer` (not OAuth2 password form) | Natural for the React SPA; no `python-multipart` until uploads need it (Phase 7) |
+| No access to a patient → 404, same as a nonexistent id; viewer editing → 403 | Never reveal that another family member's record exists |
+| 422 validation errors never echo submitted values | Default FastAPI errors reflect inputs (passwords, patient names) back to the client and into any logs |
+| Structural test: every `{patient_id}` route must depend on `get_patient_access` | Makes Principle 2's access check impossible to forget in later phases |
 
 ### Deferred (revisit only if needed)
 - OCR fallback for scanned/photographed reports: Tesseract first, vision model only for low-confidence pages.

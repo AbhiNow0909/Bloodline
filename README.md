@@ -152,10 +152,34 @@ uv run alembic upgrade head
 Autogenerate does not detect changes to CHECK constraints (e.g. adding a new report
 status). Write those migration steps by hand.
 
-### Creating a user *(available from Phase 4)*
+### Creating a user and logging in
 
-There is no public sign-up. Accounts are created with a CLI script inside the API container.
-The exact command will be documented in Phase 4.
+There is no public sign-up. Create accounts with the CLI inside the API container. It prompts
+for the password twice (at least 12 characters); the password is never a command-line
+argument, so it stays out of shell history:
+
+```bash
+docker compose exec api python -m app.cli.create_user --email you@example.com --name "Your Name"
+```
+
+For scripts, pipe the password in with `--password-stdin` instead of being prompted.
+
+Log in to get a bearer token (valid for `JWT_EXPIRE_MINUTES`, default 24 h), then send it
+in the `Authorization` header. The interactive docs at <http://localhost:8000/docs> have an
+**Authorize** button for the same thing.
+
+```bash
+curl -s -X POST http://localhost:8000/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email": "you@example.com", "password": "..."}'
+# {"access_token": "eyJ...", "token_type": "bearer", "expires_in": 86400}
+
+curl -s http://localhost:8000/patients -H "Authorization: Bearer eyJ..."
+```
+
+Family members ("patients") are created through the API; whoever creates one becomes its
+**owner**. Only owners can edit or delete a patient; **viewers** can only read. A user who
+has no access to a patient gets `404 Not Found`, exactly as if it did not exist.
 
 ### Frontend *(available from Phase 9)*
 

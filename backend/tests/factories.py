@@ -24,6 +24,7 @@ from app.models import (
     User,
     UserPatientAccess,
 )
+from app.security import create_access_token
 
 _sequence = itertools.count(1)
 
@@ -32,6 +33,10 @@ def add[T: Base](session: Session, instance: T) -> T:
     session.add(instance)
     session.flush()
     return instance
+
+
+def auth_headers(user: User) -> dict[str, str]:
+    return {"Authorization": f"Bearer {create_access_token(user.id)}"}
 
 
 def build_user(**overrides: Any) -> User:
