@@ -238,6 +238,19 @@ Processing needs `GROQ_API_KEY`; without it, uploads end as `failed` with that r
 confirm, every number (value, canonical unit, flag) is recomputed on the server from the
 reviewed text and range.
 
+### History and trends
+
+| Endpoint | What it does |
+|---|---|
+| `GET /patients/{id}/reports` | the member's reports, newest first, with value and flagged counts |
+| `GET /reports/{id}/metrics` | the values saved from one confirmed report |
+| `GET /patients/{id}/metrics` | every test the member has results for, with its latest value |
+| `GET /patients/{id}/metrics/{metric_id}?start=&end=` | one test over time (oldest first), with the reference range also in the canonical unit for charts |
+| `GET /patients/{id}/out-of-range?since=&latest_only=` | tests whose latest value is flagged (or, with `latest_only=false`, every flagged value) |
+| `GET /families/{id}/overview` | each member's latest out-of-range values, side by side |
+
+Dates (`start`, `end`, `since`) are calendar days in Indian time, like the reports.
+
 ### Frontend *(available from Phase 9)*
 
 ```bash

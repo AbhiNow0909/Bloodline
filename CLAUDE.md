@@ -440,7 +440,14 @@ Each phase ends with a manual commit by the user.
   - Verified end to end in the production image against the **real** Groq API (synthetic PDF, throwaway DB): upload → processed → review (4 rows, female ranges, no warnings) → confirm → duplicate 409 → file download identical. CI docker job now uploads the synthetic report and asserts it fails cleanly with "GROQ_API_KEY is not set" and that a re-upload is 409 (replayed locally from the YAML).
   - Code review: capped decimals at 18 significant digits (confirm bounds → 422; longer printed "numbers" stay text) — `NaN`/`Infinity` were already rejected by Pydantic.
   - Follow-ups: a report stuck in `processing` (server restart mid-task) can only be deleted and re-uploaded; add a stale-processing retry if it ever happens. **Phase 8** lists reports per member and reads confirmed `metrics`. **Phase 10** the frontend uploads with `XMLHttpRequest` (raw body, progress events), fetches `/reports/{id}/file` as a blob with the bearer token for the PDF preview, and uses `/metric-dictionary` for mapping. **Phase 12** chunk `StoredProcessing.extraction.pages[].text` on confirm (hook marked in `confirm_report`).
-- [ ] Phase 8 — History and metrics API
+- [x] Phase 8 — History and metrics API
+  - `app/services/history.py`: read-side queries that take the **exact patient ids** to read (callers resolve them via ownership checks; the Phase 13 agent tools will reuse them with one member's id or one family's ids): `list_reports` (newest first by collection time, else upload time; value and flagged counts via `count() FILTER`), `report_readings`, `metric_catalog` (latest reading per test via Postgres `DISTINCT ON (patient_id, series)` where series = dictionary id, else `raw:<printed name>`; count and first date; unmapped tests last), `metric_history` (oldest first; `start`/`end` inclusive Indian calendar days; each point carries `reference_low/high_canonical` converted with the Phase 6 unit rules so chart bands line up across labs), `out_of_range` (default: tests whose *latest* value is low/high; `latest_only=False` for every flagged value; `since`), `family_overview` (per member: latest out-of-range values, tracked-test count, last confirmed collection time; 4 queries for the whole family).
+  - `app/api/history.py`: `GET /patients/{id}/reports`, `GET /reports/{id}/metrics`, `GET /patients/{id}/metrics`, `GET /patients/{id}/metrics/{metric_id}` (404 unknown metric, 422 `start > end`, empty series if never tested), `GET /patients/{id}/out-of-range`, `GET /families/{id}/overview`. All behind the existing ownership checks (structural test covers them). `app/schemas/history.py`: `MetricInfo` (incl. description for explanations), `Reading`, `HistoryPoint`, `MetricHistory`, `CatalogEntry`, `FlaggedReading`, `ReportSummary`, `MemberOverview`, `FamilyOverview`; decimals serialize as exact strings.
+  - Context7: SQLAlchemy 2.0 `select().distinct(*cols)` renders `DISTINCT ON` on PostgreSQL without deprecation.
+  - Tests: 393 total (11 new): ordering and counts, one report's values, catalog latest/first/count/unmapped, time series with g/L→g/dL range conversion, midnight-edge IST date filters, 404/422/empty, out-of-range now vs ever vs since, **service scoping by exact patient ids** (one, two, none; never a stranger), family overview (flagged, clean, no-data members; other family excluded), 404/401 on every history route.
+  - Verified end to end in the production image with real Groq (synthetic PDF, throwaway DB): upload → confirm → reports, catalog, series, out-of-range and family overview all return the confirmed values.
+  - Bug found by tests: `dict(result)` on a SQLAlchemy `Result` treats it as a mapping (it has `.keys()`); use `.all()` first.
+  - Follow-ups: unmapped tests appear in the catalog but have no time-series endpoint (map them in review). **Phase 9**: install the `frontend-design` plugin (`/plugin install frontend-design@claude-plugins-official`); it is not installed yet and Section 9 asks to use it for all UI work.
 - [ ] Phase 9 — Frontend scaffold and auth
 - [ ] Phase 10 — Frontend upload and review
 - [ ] Phase 11 — Frontend history and charts
@@ -451,7 +458,7 @@ Each phase ends with a manual commit by the user.
 - [ ] Phase 16 — Deployment (CD)
 - [ ] Phase 17 — Hardening and polish
 
-**Next step:** Phase 8 — History and metrics API (after the user commits Phase 7 and CI is green).
+**Next step:** Phase 9 — Frontend scaffold and auth (after the user commits Phase 8 and CI is green). Install the `frontend-design` plugin first.
 
 ---
 
@@ -528,6 +535,10 @@ Use whatever is installed in this environment when it helps. Check what is avail
 | Processing results live in `reports.raw_extraction` (`StoredProcessing`, versioned); no migration | Header fields, scrubbed text and rows are review-time data; `lab_name`/`collected_at` already have columns |
 | Confirm recomputes every number server-side from reviewed text and bounds | The client and the LLM are never trusted for values or flags |
 | Failed reports can be retried; any report can be deleted | Dedupe would otherwise block re-uploading after a transient failure |
+| *Made during Phase 8:* | |
+| History services take explicit patient ids; routes resolve them through ownership checks | One scoping contract for the API and the agent tools (member or family) |
+| "Out of range" defaults to tests whose latest value is flagged | Answers "what needs attention now"; history of flagged values is available with `latest_only=false` |
+| Chart ranges converted to the canonical unit per point | Different labs print different units; the shaded band must match the plotted values |
 
 ### Deferred (revisit only if needed)
 - OCR fallback for scanned/photographed reports: Tesseract first, vision model only for low-confidence pages.
