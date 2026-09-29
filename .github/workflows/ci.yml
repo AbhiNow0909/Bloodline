@@ -128,7 +128,7 @@ jobs:
           docker exec api python -m app.cli.seed
           docker exec api python -m app.cli.seed # idempotent: second run must succeed too
 
-      - name: Create a user with the CLI, log in, and create a family and member
+      - name: Create a user, log in, create a family and member, upload a report
         run: |
           password="ci-smoke-test-password"
           echo "$password" | docker exec -i api python -m app.cli.create_user \
@@ -143,14 +143,37 @@ jobs:
           family_id="$(curl --silent --show-error --fail -X POST http://localhost:8000/families \
             -H "$auth" -H 'Content-Type: application/json' -d '{"name": "CI Family"}' \
             | jq -r .id)"
-          curl --silent --show-error --fail -X POST \
+          member_id="$(curl --silent --show-error --fail -X POST \
             "http://localhost:8000/families/$family_id/patients" \
             -H "$auth" -H 'Content-Type: application/json' \
-            -d '{"display_name": "CI Member", "sex": "female"}'
-          echo
+            -d '{"display_name": "CI Member", "sex": "female"}' | jq -r .id)"
           code="$(curl --silent --output /dev/null --write-out '%{http_code}' \
             http://localhost:8000/families)"
           if [ "$code" != "401" ]; then echo "::error::/families without a token gave $code"; exit 1; fi
+
+          # Upload the synthetic report. CI has no GROQ_API_KEY, so background processing must
+          # end in "failed" with that reason (extraction itself runs first and succeeds).
+          pdf=backend/tests/fixtures/synthetic_thyrocare_report.pdf
+          upload() {
+            curl --silent --output /tmp/upload.json --write-out '%{http_code}' -X POST \
+              "http://localhost:8000/patients/$member_id/reports" \
+              -H "$auth" -H 'Content-Type: application/pdf' --data-binary "@$pdf"
+          }
+          code="$(upload)"
+          if [ "$code" != "202" ]; then echo "::error::upload gave $code"; cat /tmp/upload.json; exit 1; fi
+          report_id="$(jq -r .id /tmp/upload.json)"
+          for _ in $(seq 1 30); do
+            status="$(curl --silent --fail "http://localhost:8000/reports/$report_id" \
+              -H "$auth" | jq -r .status)"
+            [ "$status" != "processing" ] && break
+            sleep 1
+          done
+          report="$(curl --silent --fail "http://localhost:8000/reports/$report_id" -H "$auth")"
+          echo "$report"
+          echo "$report" | jq -e '.status == "failed"' > /dev/null
+          echo "$report" | jq -e '.failure_reason | contains("GROQ_API_KEY")' > /dev/null
+          code="$(upload)"
+          if [ "$code" != "409" ]; then echo "::error::duplicate upload gave $code"; exit 1; fi
 
       - name: Extract the synthetic report inside the image
         run: |

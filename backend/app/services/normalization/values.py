@@ -4,6 +4,7 @@ import re
 from decimal import Decimal, InvalidOperation
 
 _NUMBER = re.compile(r"[+-]?\d+(?:\.\d+)?")
+_MAX_DIGITS = 18  # no lab value needs more; longer "numbers" are kept as text only
 
 
 def parse_number(text: str) -> Decimal | None:
@@ -13,7 +14,7 @@ def parse_number(text: str) -> Decimal | None:
     they cannot be compared against a range without guessing.
     """
     candidate = text.strip().replace(",", "")
-    if not _NUMBER.fullmatch(candidate):
+    if not _NUMBER.fullmatch(candidate) or sum(c.isdigit() for c in candidate) > _MAX_DIGITS:
         return None
     try:
         return Decimal(candidate)

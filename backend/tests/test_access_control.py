@@ -9,7 +9,7 @@ import pytest
 from fastapi.dependencies.models import Dependant
 from fastapi.routing import iter_route_contexts
 
-from app.api.deps import get_owned_family, get_owned_patient
+from app.api.deps import get_owned_family, get_owned_patient, get_owned_report
 from app.main import app
 
 # FastAPI >= 0.141 keeps included routers nested, so routes are walked with
@@ -26,6 +26,7 @@ def _depends_on(dependant: Dependant, target: Callable[..., Any]) -> bool:
     [
         pytest.param("{family_id}", get_owned_family, id="family"),
         pytest.param("{patient_id}", get_owned_patient, id="patient"),
+        pytest.param("{report_id}", get_owned_report, id="report"),
     ],
 )
 def test_every_scoped_route_checks_ownership(

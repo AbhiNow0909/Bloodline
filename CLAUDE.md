@@ -430,7 +430,16 @@ Each phase ends with a manual commit by the user.
   - Your real report was **not** sent to Groq during development (synthetic only).
   - CI docker step also imports the structuring stack inside the image. Image 387 → 392 MB. Code review: cached the Groq client (per-call clients leaked connection pools) and capped completion tokens.
   - Follow-ups: **Phase 7** load the index with `load_metric_index`, call `structure_report(extracted, patient_sex=patient.sex, …)` in the background task, store `StructuredReport.model_dump(mode="json")` (Decimals serialize as exact strings) in `raw_extraction`, surface row warnings in the review payload, map `LLMError`/`StructuringError`/`ExtractionError` messages to `failure_reason`. Known limits: range bounds are inclusive (a "Less than 30" value of exactly 30 is "normal"); ranges with category labels (e.g. vitamin D "Deficiency/Sufficiency") are left for the user to choose in review.
-- [ ] Phase 7 — Upload, review and confirm API
+- [x] Phase 7 — Upload, review and confirm API
+  - `POST /patients/{patient_id}/reports`: the PDF is the **raw request body** (`Content-Type: application/pdf`), not multipart — ownership (`get_owned_patient`) is checked before a byte is read, the `MAX_UPLOAD_MB` limit (setting, default 10, max 50) is enforced from `Content-Length` and again while streaming (413), then `%PDF-` magic (422), empty (422), wrong media type (415). Per-member SHA-256 dedupe → 409 with `{"detail": {"message", "report_id"}}` (also on a concurrent-insert race). Creates `reports` (`processing`) + `report_files`, returns 202, schedules the background task. No `python-multipart` needed.
+  - `app/services/ingestion.py`: `process_report(report_id, session_factory, client_factory, model)` opens its **own** session (FastAPI ≥ 0.106 closes request-scoped dependencies before background tasks; confirmed via Context7): extract → structure (Phase 6) → `StoredProcessing{version, extraction, structured, warnings}` in `reports.raw_extraction` (scrubbed text + header fields + rows; identity excluded) → `pending_review`, sets `lab_name`/`collected_at`. Any `ExtractionError`/`LLMError`/`StructuringError` → `failed` with its user-safe message; anything else → logged (report id only) and `failed` with a generic message; deleted reports are ignored. The session factory returns a context manager (production: a fresh `Session`; tests: `nullcontext(db_session)`); the LLM client is resolved inside the task, so a missing `GROQ_API_KEY` fails the report rather than the upload.
+  - Mismatch warnings (`member_mismatch_warnings`): printed sex vs member's sex, printed age vs age from date of birth at collection (±1 year), printed name vs display name (no shared word → gentle warning; the printed name is never stored or shown).
+  - `GET /reports/{report_id}` (status), `GET …/review` (409 unless `pending_review`), `POST …/confirm` (`ConfirmReport`: reviewed rows as text + bounds, optional aware `collected_at`; server recomputes `value_numeric`, canonical conversion and flag; unknown dictionary ids / low > high / future date / missing date → 422; not pending → 409), `POST …/retry` (failed only), `GET …/file` (PDF, `no-store`, `nosniff`), `DELETE /reports/{report_id}` (cascades), `GET /metric-dictionary`. New `get_owned_report` (report → member → family owner; 404 "Report not found"); the structural test covers `{report_id}`.
+  - `ExtractedReport.identity` got an empty default so stored extractions round-trip (they never contained identity).
+  - Tests: 382 total (54 new): upload happy path through review, only scrubbed text in the LLM call and in `raw_extraction`, media type/empty/not-PDF/size limit (declared and streamed), dedupe per member, access (401/404 before reading), review states, confirm (history rows with server-computed values, corrections re-flagged, un-mapping, removal, 9 validation cases incl. client-sent flag and `1e400`), once-only confirm, retry, file, delete cascade, cross-user 404 matrix for all report routes, dictionary list, and direct pipeline tests (six failure kinds, deleted report, non-processing report, mismatch warnings).
+  - Verified end to end in the production image against the **real** Groq API (synthetic PDF, throwaway DB): upload → processed → review (4 rows, female ranges, no warnings) → confirm → duplicate 409 → file download identical. CI docker job now uploads the synthetic report and asserts it fails cleanly with "GROQ_API_KEY is not set" and that a re-upload is 409 (replayed locally from the YAML).
+  - Code review: capped decimals at 18 significant digits (confirm bounds → 422; longer printed "numbers" stay text) — `NaN`/`Infinity` were already rejected by Pydantic.
+  - Follow-ups: a report stuck in `processing` (server restart mid-task) can only be deleted and re-uploaded; add a stale-processing retry if it ever happens. **Phase 8** lists reports per member and reads confirmed `metrics`. **Phase 10** the frontend uploads with `XMLHttpRequest` (raw body, progress events), fetches `/reports/{id}/file` as a blob with the bearer token for the PDF preview, and uses `/metric-dictionary` for mapping. **Phase 12** chunk `StoredProcessing.extraction.pages[].text` on confirm (hook marked in `confirm_report`).
 - [ ] Phase 8 — History and metrics API
 - [ ] Phase 9 — Frontend scaffold and auth
 - [ ] Phase 10 — Frontend upload and review
@@ -442,7 +451,7 @@ Each phase ends with a manual commit by the user.
 - [ ] Phase 16 — Deployment (CD)
 - [ ] Phase 17 — Hardening and polish
 
-**Next step:** Phase 7 — Upload, review and confirm API (after the user commits Phase 6 and CI is green).
+**Next step:** Phase 8 — History and metrics API (after the user commits Phase 7 and CI is green).
 
 ---
 
@@ -513,6 +522,12 @@ Use whatever is installed in this environment when it helps. Check what is avail
 | Own retry policy (SDK retries off): backoff with full jitter, honour `Retry-After`, 4 attempts, only 429/5xx/network | One tested policy; friendly "busy, try again" after exhaustion |
 | Only analyte-independent unit conversions | mg/dL ↔ mmol/L depends on the analyte; guessing would corrupt history, so such rows are flagged for review |
 | Live LLM test uses the synthetic report only and is skipped without `GROQ_API_KEY` | CI needs no secret; the user's real data is not sent to Groq during development |
+| *Made during Phase 7:* | |
+| Upload the PDF as the raw request body (`application/pdf`), not multipart | Ownership is checked before reading; size limit enforced while streaming; no `python-multipart`; XHR still gives upload progress |
+| Flat `/reports/{report_id}` routes with `get_owned_report` | One ownership join; the structural test covers `{report_id}` |
+| Processing results live in `reports.raw_extraction` (`StoredProcessing`, versioned); no migration | Header fields, scrubbed text and rows are review-time data; `lab_name`/`collected_at` already have columns |
+| Confirm recomputes every number server-side from reviewed text and bounds | The client and the LLM are never trusted for values or flags |
+| Failed reports can be retried; any report can be deleted | Dedupe would otherwise block re-uploading after a transient failure |
 
 ### Deferred (revisit only if needed)
 - OCR fallback for scanned/photographed reports: Tesseract first, vision model only for low-confidence pages.

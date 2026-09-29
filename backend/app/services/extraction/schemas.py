@@ -61,7 +61,8 @@ class ExtractedReport(BaseModel):
     dropped_pages: tuple[int, ...] = Field(description="Cover, summary and boilerplate pages")
     warnings: tuple[str, ...] = ()
     # Excluded from model_dump()/JSON and from repr, so it cannot leak into storage or logs.
-    identity: PrintedIdentity = Field(exclude=True, repr=False)
+    # A stored report read back therefore has an empty identity (the default).
+    identity: PrintedIdentity = Field(default_factory=PrintedIdentity, exclude=True, repr=False)
 
     def llm_text(self) -> str:
         """The scrubbed results of every page, each labelled with its sample type."""

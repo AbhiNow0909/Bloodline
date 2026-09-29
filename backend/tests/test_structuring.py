@@ -24,21 +24,11 @@ from app.services.structuring.service import (
     VALUE_NOT_IN_SOURCE,
 )
 from tests import synthetic_pdf as fake
-from tests.structuring_data import SYNTHETIC_LLM_REPLY, seed_metric_index
+from tests.structuring_data import SYNTHETIC_LLM_REPLY, FakeChatClient, seed_metric_index
 from tests.synthetic_pdf import FIXTURE_PATH
 
 REPORT = extract_report(FIXTURE_PATH.read_bytes())
 INDEX = seed_metric_index()
-
-
-class FakeChatClient:
-    def __init__(self, reply: dict[str, Any] | str) -> None:
-        self.reply = reply if isinstance(reply, str) else json.dumps(reply)
-        self.calls: list[dict[str, Any]] = []
-
-    def complete_json(self, **kwargs: Any) -> str:
-        self.calls.append(kwargs)
-        return self.reply
 
 
 def structure(

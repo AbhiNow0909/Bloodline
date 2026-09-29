@@ -18,6 +18,7 @@ class Settings(BaseSettings):
 
     database_url: str
     cors_origins: str = "http://localhost:5173"
+    max_upload_mb: int = Field(default=10, gt=0, le=50)
     # HS256 needs a key of at least 32 bytes (RFC 7518). SecretStr keeps it out of reprs/logs.
     jwt_secret: SecretStr = Field(min_length=32)
     jwt_expire_minutes: int = Field(default=1440, gt=0)

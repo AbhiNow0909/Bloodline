@@ -208,6 +208,36 @@ Only a family's creator can see it. Anything you cannot see answers `404 Not Fou
 as if it did not exist, so other users' families are never revealed. In the API a family
 member is called a *patient*.
 
+### Uploading and reviewing a report
+
+A report goes through `processing` → `pending_review` → `confirmed` (or `failed`, with a
+reason). Upload the PDF **as the request body** (not a form):
+
+```bash
+curl -s -X POST http://localhost:8000/patients/<member id>/reports \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/pdf' \
+  --data-binary @report.pdf
+# 202 {"id": "<report id>", "status": "processing", ...}
+
+curl -s http://localhost:8000/reports/<report id> -H "Authorization: Bearer $TOKEN"
+# poll until "status" is "pending_review" (usually a few seconds) or "failed"
+```
+
+| Endpoint | What it does |
+|---|---|
+| `POST /patients/{id}/reports` | upload a PDF (max `MAX_UPLOAD_MB`); 409 if that member already has it |
+| `GET /reports/{id}` | status, lab, collection time, failure reason |
+| `GET /reports/{id}/review` | extracted rows (as printed, plus the chosen range, flag, dictionary match and warnings) |
+| `POST /reports/{id}/confirm` | save the reviewed rows (edited, removed or re-mapped) to the member's history |
+| `POST /reports/{id}/retry` | process a `failed` report again, e.g. after the AI service was busy |
+| `GET /reports/{id}/file` | the original PDF |
+| `DELETE /reports/{id}` | delete the report, its file and any saved values |
+| `GET /metric-dictionary` | every known test, for mapping unknown names during review |
+
+Processing needs `GROQ_API_KEY`; without it, uploads end as `failed` with that reason. On
+confirm, every number (value, canonical unit, flag) is recomputed on the server from the
+reviewed text and range.
+
 ### Frontend *(available from Phase 9)*
 
 ```bash
@@ -251,7 +281,8 @@ pull request, and on demand:
   against Postgres, checks that `/health` returns 200 and that the container is not running
   as root, then migrates and seeds the empty database from inside the image (twice for the
   seed, to prove it is idempotent), creates a user with the CLI, logs in, creates a family
-  and a member through the API, and extracts the synthetic report inside the image.
+  and a member through the API, uploads the synthetic report (which must fail cleanly for
+  lack of a Groq key in CI, then be refused as a duplicate), and extracts it inside the image.
 
 ## Privacy
 

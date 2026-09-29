@@ -1,7 +1,9 @@
-"""Shared FastAPI dependencies: database session, current user, and access to
-families and family members (patients) through family ownership."""
+"""Shared FastAPI dependencies: database session, current user, and access to families,
+family members (patients) and their reports through family ownership."""
 
 import uuid
+from collections.abc import Callable
+from contextlib import AbstractContextManager
 from typing import Annotated
 
 import jwt
@@ -10,9 +12,10 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db import get_db
-from app.models import Family, Patient, User
+from app.db import get_db, get_engine
+from app.models import Family, Patient, Report, User
 from app.security import decode_access_token
+from app.services.llm import ChatClient, get_structuring_client
 
 DbSession = Annotated[Session, Depends(get_db)]
 
@@ -77,3 +80,41 @@ def get_owned_patient(patient_id: uuid.UUID, user: CurrentUser, db: DbSession) -
 
 
 OwnedPatient = Annotated[Patient, Depends(get_owned_patient)]
+
+
+def get_owned_report(report_id: uuid.UUID, user: CurrentUser, db: DbSession) -> Report:
+    """Resolve `{report_id}` for the current user: the report's family member must be in one
+    of their families. Every route with `{report_id}` in its path must depend on this (a test
+    enforces it). Missing access is a 404, identical to a nonexistent id.
+    """
+    report = db.scalar(
+        select(Report)
+        .join(Patient, Patient.id == Report.patient_id)
+        .join(Family, Family.id == Patient.family_id)
+        .where(Report.id == report_id, Family.owner_id == user.id)
+    )
+    if report is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Report not found")
+    return report
+
+
+OwnedReport = Annotated[Report, Depends(get_owned_report)]
+
+
+# --- background processing (overridden in tests) ------------------------------------------
+
+
+def get_session_factory() -> Callable[[], AbstractContextManager[Session]]:
+    """Background tasks open their own session; the request's is closed before they run."""
+    return lambda: Session(get_engine())
+
+
+def get_client_factory() -> Callable[[], ChatClient]:
+    """Resolved inside the task, so a missing GROQ_API_KEY fails the report, not the upload."""
+    return get_structuring_client
+
+
+SessionFactoryDep = Annotated[
+    Callable[[], AbstractContextManager[Session]], Depends(get_session_factory)
+]
+ClientFactoryDep = Annotated[Callable[[], ChatClient], Depends(get_client_factory)]

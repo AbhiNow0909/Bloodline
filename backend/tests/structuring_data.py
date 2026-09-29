@@ -1,5 +1,6 @@
 """Shared data for structuring tests. Everything here describes the SYNTHETIC fixture report."""
 
+import json
 import uuid
 from typing import Any
 
@@ -68,3 +69,18 @@ def seed_metric_index() -> MetricIndex:
         (DictionaryEntry(uuid.uuid4(), seed.canonical_name, seed.canonical_unit), seed.aliases)
         for seed in load_metric_seeds()
     )
+
+
+class FakeChatClient:
+    """Stands in for the Groq client at the `ChatClient` boundary: replies with `reply`
+    (or raises it, if it is an exception) and records every call."""
+
+    def __init__(self, reply: dict[str, Any] | str | Exception = SYNTHETIC_LLM_REPLY) -> None:
+        self.reply = reply
+        self.calls: list[dict[str, Any]] = []
+
+    def complete_json(self, **kwargs: Any) -> str:
+        self.calls.append(kwargs)
+        if isinstance(self.reply, Exception):
+            raise self.reply
+        return self.reply if isinstance(self.reply, str) else json.dumps(self.reply)

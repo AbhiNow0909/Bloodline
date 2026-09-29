@@ -46,7 +46,9 @@ def test_numbers_parse_exactly(text: str, expected: Decimal) -> None:
     assert str(parsed) == str(expected)  # printed precision kept ("84.20", not 84.2)
 
 
-@pytest.mark.parametrize("text", ["<0.5", ">1000", "Negative", "Trace", "", "12.6 H", "1.2.3"])
+@pytest.mark.parametrize(
+    "text", ["<0.5", ">1000", "Negative", "Trace", "", "12.6 H", "1.2.3", "9" * 19]
+)
 def test_qualified_or_descriptive_values_are_not_numbers(text: str) -> None:
     assert parse_number(text) is None
 
