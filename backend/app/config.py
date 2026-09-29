@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # The repo-root .env is read for local (non-Docker) runs. In containers it resolves to a
@@ -21,6 +21,17 @@ class Settings(BaseSettings):
     # HS256 needs a key of at least 32 bytes (RFC 7518). SecretStr keeps it out of reprs/logs.
     jwt_secret: SecretStr = Field(min_length=32)
     jwt_expire_minutes: int = Field(default=1440, gt=0)
+
+    # Optional so the app and tests run without it; LLM features fail clearly if it is unset.
+    groq_api_key: SecretStr | None = None
+    structuring_model: str = "openai/gpt-oss-20b"
+    agent_model: str = "openai/gpt-oss-120b"
+
+    @field_validator("groq_api_key", mode="before")
+    @classmethod
+    def blank_key_is_unset(cls, value: object) -> object:
+        """`GROQ_API_KEY=` (as in .env.example) means "not configured"."""
+        return None if isinstance(value, str) and not value.strip() else value
 
     @property
     def cors_origin_list(self) -> list[str]:

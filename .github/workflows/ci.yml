@@ -157,6 +157,7 @@ jobs:
           docker exec -i api python -c "
           import sys
           from app.services.extraction import extract_report
+          from app.services.structuring import structure_report  # LLM stack imports cleanly
           report = extract_report(sys.stdin.buffer.read())
           pages = [page.page_number for page in report.pages]
           assert pages == [3, 4, 5], pages

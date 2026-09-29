@@ -419,7 +419,17 @@ Each phase ends with a manual commit by the user.
   - CI docker job also extracts the synthetic report inside the built image (native deps check).
   - Context7 used (pdfplumber API). Testing-strategy and code-review skills used; review added whole-phrase name scrubbing so short name parts (e.g. "LI") go when the full name appears.
   - Follow-ups: **Phase 6** send `llm_text()` only; parse ranges like `Male:/Female:`, `Men:/Women:`, `Adults: Less than N`, units `µg/mL`, `µg/mg of Creatinine`. **Phase 7** store header fields (sample types, times, printed age/sex) on the report (migration or `raw_extraction`, never the identity) and compare `identity.names` with the member's display name for a mismatch warning. Known limits: only Thyrocare-style layouts (others → `UnsupportedLayoutError`); the `Report Remarks` footer is dropped entirely (lab remarks are not available to RAG yet); name parts shorter than 3 characters are scrubbed only as part of the full name.
-- [ ] Phase 6 — LLM structuring and normalization
+- [x] Phase 6 — LLM structuring and normalization
+  - Model IDs confirmed live against the Groq `/models` endpoint with the user's key (`openai/gpt-oss-20b`, `openai/gpt-oss-120b`, 131k context); Groq structured outputs (`json_schema`, `strict: true`) and SDK errors/retries confirmed via Context7. `groq` SDK 1.7.
+  - `app/services/llm/`: `ChatClient` protocol (the mocking boundary), `GroqChatClient` (strict JSON schema, `temperature=0`, `seed=0`, `reasoning_effort="low"`, `reasoning_format="hidden"`, `max_completion_tokens=16384`; SDK retries off), `retry.call_with_retries` (exponential backoff with full jitter, honours `Retry-After`, 4 attempts; retries 429/5xx/connection/timeouts only), errors `LLMUnavailableError` ("busy, try again"), `LLMRequestError` (status only, never the key), `LLMNotConfiguredError`. `get_structuring_client()` is cached (one HTTP pool). Settings: `GROQ_API_KEY` (optional `SecretStr`; blank = unset), `STRUCTURING_MODEL`, `AGENT_MODEL`.
+  - **Division of labour (differs from Section 4.1 step 5, see Decision log):** the LLM only segments and copies strings (`raw_name`, `panel`, `technology`, `value`, `unit`, `method`, `sample_type`, and each printed range line as `{label, text}`); Python derives everything numeric. `app/services/structuring/`: hand-written strict schema (`LLM_REPORT_SCHEMA`, kept in sync with `LlmReport` by a test), `SYSTEM_PROMPT`, `structure_report()` (sends only `ExtractedReport.llm_text()`, re-runs the leak check at the LLM boundary, validates the reply with Pydantic) and `normalize_test()`.
+  - `app/services/normalization/`: `parse_number` (exact `Decimal`; "<0.5"/"Negative" stay text), `parse_bounds` ("39 - 259", "Less than 30", "> 5", en dash, "Upto"), `select_range` (patient's sex line, else a single general line such as "Adults"/unlabelled; ambiguous or subgroup-only → none), `compute_flag` (inclusive bounds), `convert`/`unit_key` (µ/μ→u, `10³`, lakhs/thousand/million per cumm; SI-prefix arithmetic within mass/mol/IU/count per volume and mass/mass; analyte-specific conversions such as mg/dL→mmol/L are never guessed), `MetricIndex`/`name_key`/`load_metric_index` (exact normalized names and aliases, trailing "(…)" handled, urine sample prefers the urine test; never substring).
+  - Every row keeps what was printed (`value_text`, `unit`, full `reference_text`, chosen `reference_label`) and carries review warnings: value or name not found in the report text (catches hallucinations and prompt-injected values), unknown test, no range matched (numeric values only), unit not converted.
+  - A real `gpt-oss-20b` reply for the synthetic report (1.6 s) is recorded in `tests/structuring_data.py`; it revealed the model sometimes appends the TECHNOLOGY value to the test name, now stripped deterministically. Synthetic report → Urine Creatinine / Urine Microalbumin / UACR / Ferritin, female ranges chosen, µg/mL→mg/L and µg/mg→mg/g, all "normal", no warnings.
+  - Tests: 328 total (117 new): numbers, bounds, range selection (sexes, Men/Women, Adult Male, general, ambiguous), flags, unit keys and conversions, name mapping incl. no-substring cases and the DB-loaded index, retry/backoff/Retry-After/give-up/non-retryable/non-JSON with real `groq` exception objects, schema strictness, only scrubbed text sent, leak guard stops before any call, invalid reply shapes, hallucinated value warning, qualitative and unconvertible values, and one `live` test (synthetic report through real Groq; skipped without `GROQ_API_KEY`, as in CI).
+  - Your real report was **not** sent to Groq during development (synthetic only).
+  - CI docker step also imports the structuring stack inside the image. Image 387 → 392 MB. Code review: cached the Groq client (per-call clients leaked connection pools) and capped completion tokens.
+  - Follow-ups: **Phase 7** load the index with `load_metric_index`, call `structure_report(extracted, patient_sex=patient.sex, …)` in the background task, store `StructuredReport.model_dump(mode="json")` (Decimals serialize as exact strings) in `raw_extraction`, surface row warnings in the review payload, map `LLMError`/`StructuringError`/`ExtractionError` messages to `failure_reason`. Known limits: range bounds are inclusive (a "Less than 30" value of exactly 30 is "normal"); ranges with category labels (e.g. vitamin D "Deficiency/Sufficiency") are left for the user to choose in review.
 - [ ] Phase 7 — Upload, review and confirm API
 - [ ] Phase 8 — History and metrics API
 - [ ] Phase 9 — Frontend scaffold and auth
@@ -432,7 +442,7 @@ Each phase ends with a manual commit by the user.
 - [ ] Phase 16 — Deployment (CD)
 - [ ] Phase 17 — Hardening and polish
 
-**Next step:** Phase 6 — LLM structuring and normalization (after the user commits Phase 5 and CI is green). Needs a Groq API key in `.env` (`GROQ_API_KEY`) for the optional live test.
+**Next step:** Phase 7 — Upload, review and confirm API (after the user commits Phase 6 and CI is green).
 
 ---
 
@@ -497,6 +507,12 @@ Use whatever is installed in this environment when it helps. Check what is avail
 | Synthetic PDF fixture from a tiny deterministic writer in `tests/`, not a PDF library | No new dependency; exact control of layout; reproducible bytes checked by a test |
 | No PyMuPDF fallback yet | pdfplumber reads the real report fully; PyMuPDF is AGPL — add only when a real report needs it |
 | Report times parsed as fixed +05:30 IST | Thyrocare prints Indian local time; India has no DST; avoids a tzdata dependency |
+| *Made during Phase 6:* | |
+| The structuring LLM only segments and copies strings; values, range bounds, sex-specific range choice, unit conversion, dictionary mapping and flags are computed in Python (refines Section 4.1 step 5) | No number ever comes from the model; logic is deterministic and unit-tested; each copied value is checked against the source text, so hallucinated or injected values surface in review |
+| Hand-written strict JSON schema for Groq structured outputs (+ sync test with the Pydantic models) | Strict mode requires every field required and `additionalProperties: false`; explicit beats generated for a provider contract |
+| Own retry policy (SDK retries off): backoff with full jitter, honour `Retry-After`, 4 attempts, only 429/5xx/network | One tested policy; friendly "busy, try again" after exhaustion |
+| Only analyte-independent unit conversions | mg/dL ↔ mmol/L depends on the analyte; guessing would corrupt history, so such rows are flagged for review |
+| Live LLM test uses the synthetic report only and is skipped without `GROQ_API_KEY` | CI needs no secret; the user's real data is not sent to Groq during development |
 
 ### Deferred (revisit only if needed)
 - OCR fallback for scanned/photographed reports: Tesseract first, vision model only for low-confidence pages.
