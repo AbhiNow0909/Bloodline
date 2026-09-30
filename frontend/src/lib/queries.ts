@@ -54,6 +54,10 @@ export const keys = {
   readings: (id: string) => ['reports', id, 'readings'] as const,
   reportFile: (id: string) => ['reports', id, 'file'] as const,
   dictionary: ['metric-dictionary'] as const,
+  catalog: (memberId: string) => ['members', memberId, 'catalog'] as const,
+  metricHistory: (memberId: string, metricId: string) =>
+    ['members', memberId, 'history', metricId] as const,
+  familyOverview: (familyId: string) => ['families', familyId, 'overview'] as const,
 }
 
 /** How often a report being read is checked again. Tests shorten it. */
@@ -203,10 +207,24 @@ export function useReportFileUrl(id: string) {
   }
 }
 
-/** Put a report's new state into the cache, and refresh the member's report list. */
+/** Put a report's new state into the cache, and refresh everything built from the member's
+ * reports: their report list, results and charts, and the family overviews. */
 function reportChanged(client: QueryClient, report: Report) {
   client.setQueryData(keys.report(report.id), report)
-  return client.invalidateQueries({ queryKey: keys.reports(report.patient_id) })
+  return historyChanged(client, report.patient_id)
+}
+
+function historyChanged(client: QueryClient, memberId: string) {
+  return Promise.all([
+    client.invalidateQueries({
+      queryKey: ['members', memberId],
+      // The member's own details did not change.
+      predicate: (query) => query.queryKey.length > 2,
+    }),
+    client.invalidateQueries({
+      predicate: (query) => query.queryKey[0] === 'families' && query.queryKey[2] === 'overview',
+    }),
+  ])
 }
 
 /** Upload a PDF; `progress` is 0–1 while the file is being sent. */
@@ -251,9 +269,29 @@ export function useDeleteReport(report: Pick<Report, 'id' | 'patient_id'>) {
         old?.filter((r) => r.id !== report.id),
       )
       return Promise.all([
-        client.invalidateQueries({ queryKey: keys.reports(report.patient_id) }),
+        historyChanged(client, report.patient_id),
         client.invalidateQueries({ queryKey: keys.report(report.id), refetchType: 'none' }),
       ])
     },
   })
 }
+
+// --- history -------------------------------------------------------------------------------
+
+/** Every test the member has results for, with its latest value. */
+export const useCatalog = (memberId: string) =>
+  useQuery({ queryKey: keys.catalog(memberId), queryFn: () => api.catalog(memberId) })
+
+/** One test's results over time, for its chart. */
+export const useMetricHistory = (memberId: string, metricId: string) =>
+  useQuery({
+    queryKey: keys.metricHistory(memberId, metricId),
+    queryFn: () => api.metricHistory(memberId, metricId),
+  })
+
+/** Each member's latest out-of-range values, side by side. */
+export const useFamilyOverview = (familyId: string) =>
+  useQuery({
+    queryKey: keys.familyOverview(familyId),
+    queryFn: () => api.familyOverview(familyId),
+  })

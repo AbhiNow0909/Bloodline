@@ -16,7 +16,7 @@ export const DICTIONARY: MetricDefinition[] = [
     category: 'Iron studies',
     canonical_unit: 'ng/mL',
     aliases: [],
-    description: null,
+    description: 'Protein that stores iron in the body.',
   },
   {
     id: 'metric-b12',

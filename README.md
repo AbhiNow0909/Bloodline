@@ -98,8 +98,9 @@ React SPA (Vercel) ──HTTPS + JWT──▶ FastAPI (Docker on Render)
 │   └── src/
 │       ├── lib/            # API client, session, queries, formatting
 │       ├── components/     # shared UI (buttons, fields, dialogs, folder/file cards)
-│       ├── pages/          # login, families, family, member, report, not found
-│       ├── reports/        # upload, report list, review form, saved values, PDF preview
+│       ├── pages/          # login, families, family, member, report, test, not found
+│       ├── reports/        # upload, report timeline, review form, saved values, PDF preview
+│       ├── history/        # latest results, trend chart, family overview
 │       ├── auth/           # route guard
 │       └── test/           # test setup, fake API
 └── .github/workflows/      # CI (deployment comes in Phase 16)
@@ -287,6 +288,13 @@ The app calls the API at `VITE_API_BASE_URL` from the repo-root `.env` (default
   date if the report did not print one. Warnings that the report may be for someone else are
   shown first. Nothing is saved until you press *Save*; leaving with unsaved corrections asks
   first. The server recomputes every number and flag from what you saved.
+- **Results**: a member's page lists the tests whose latest result is outside the lab's range,
+  then every test's latest result by category, and the reports as a timeline. Each test opens
+  its own page: the latest and previous result, a chart over time with the lab's range as a
+  shaded band (Low/High points are triangles, never colour alone), and every result in a
+  table. Values from labs that print different units are drawn in one unit.
+- **Family overview**: on a family's page, each member's latest out-of-range results side by
+  side, in words.
 - The sign-in token is kept in the browser's `localStorage` until it expires (24 h by
   default), so a reload stays signed in. Logging out, an expired token or a rejected token
   signs out every tab and clears everything cached in the page.

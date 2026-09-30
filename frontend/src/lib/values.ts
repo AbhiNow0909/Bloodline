@@ -75,3 +75,12 @@ export function formatRange(low: string | null, high: string | null): string | n
   if (low !== null) return `${low} or more`
   return null
 }
+
+/** A reading's printed range for tables: "12 – 15", "Up to 30", the printed text, or "–". */
+export function rangeText(reading: {
+  reference_low: string | null
+  reference_high: string | null
+  reference_text: string | null
+}): string {
+  return formatRange(reading.reference_low, reading.reference_high) ?? reading.reference_text ?? '–'
+}

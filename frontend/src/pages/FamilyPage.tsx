@@ -19,6 +19,7 @@ import {
   useMembers,
   useRenameFamily,
 } from '../lib/queries'
+import { FamilyOverview } from '../history/FamilyOverview'
 import { NotFound } from './NotFoundPage'
 
 type OpenDialog = 'add' | 'rename' | 'delete' | null
@@ -117,6 +118,8 @@ export function FamilyPage() {
           </li>
         </ul>
       </section>
+
+      {count > 0 && <FamilyOverview familyId={familyId} />}
 
       <Dialog open={dialog === 'add'} onClose={close} title={`Add someone to ${name}`}>
         <MemberForm

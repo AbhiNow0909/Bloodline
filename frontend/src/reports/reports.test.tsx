@@ -72,10 +72,10 @@ describe('a member’s reports', () => {
     )
     renderApp(`/families/${family.id}/members/${amma.id}`)
 
-    const list = (await screen.findByRole('link', { name: /Report of 3 Mar 2026/ })).closest('ul')
-    const items = within(list ?? document.body).getAllByRole('listitem')
+    const list = await screen.findByRole('list', { name: 'Reports, newest first' })
+    const items = within(list).getAllByRole('listitem')
     expect(items.map((item) => item.textContent)).toEqual([
-      'Report of 3 Mar 2026Example Labs. 2 values, 1 outside the rangeSaved',
+      '2026Report of 3 Mar 2026Example Labs. 2 values, 1 outside the rangeSaved',
       'Report of 28 Sept 2026Example LabsNeeds your review',
       "Report uploaded 29 Sept 2026Couldn't be read",
       'Report uploaded 29 Sept 2026Being read',

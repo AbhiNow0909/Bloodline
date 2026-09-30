@@ -7,17 +7,19 @@
 import { vi } from 'vitest'
 
 import type {
+  CatalogEntry,
   ConfirmReportInput,
   Family,
   Member,
   MemberInput,
+  MetricInfo,
   Reading,
   Report,
   ReportReview,
   ReportSummary,
   User,
 } from '../lib/types'
-import { previewFlag } from '../lib/values'
+import { parseNumber, previewFlag } from '../lib/values'
 import { DICTIONARY, sampleReview } from './reportData'
 import { fakeToken } from './session'
 
@@ -156,10 +158,10 @@ export function fakeApi() {
       canonical_metric_id: row.canonical_metric_id,
       raw_name: row.raw_name,
       value_text: row.value_text,
-      value_numeric: null,
+      value_numeric: parseNumber(row.value_text),
       unit: row.unit,
-      value_canonical: null,
-      unit_canonical: null,
+      value_canonical: row.canonical_metric_id ? parseNumber(row.value_text) : null,
+      unit_canonical: row.canonical_metric_id ? row.unit : null,
       reference_low: row.reference_low,
       reference_high: row.reference_high,
       reference_text: row.reference_text,
@@ -168,6 +170,85 @@ export function fakeApi() {
     Object.assign(report, { status: 'confirmed', collected_at: collectedAt })
     entry.review = null
     return json(200, report)
+  }
+
+  // --- history, derived from confirmed readings like the backend does ---
+
+  const metricInfo = (id: string | null): MetricInfo | null => {
+    const found = DICTIONARY.find((d) => d.id === id)
+    return found
+      ? {
+          id: found.id,
+          canonical_name: found.canonical_name,
+          category: found.category,
+          canonical_unit: found.canonical_unit,
+          description: found.description,
+        }
+      : null
+  }
+  const readingsOf = (memberIds: string[]) =>
+    [...reports.values()]
+      .filter((r) => r.report.status === 'confirmed' && memberIds.includes(r.report.patient_id))
+      .flatMap((r) => r.readings)
+  const seriesOf = (r: Reading) => r.canonical_metric_id ?? `raw:${r.raw_name}`
+  const byTime = (a: Reading, b: Reading) => Date.parse(a.collected_at) - Date.parse(b.collected_at)
+  const nameOf = (r: Reading) => metricInfo(r.canonical_metric_id)?.canonical_name ?? r.raw_name
+  const byCategoryAndName = (a: Reading, b: Reading) => {
+    const ca = metricInfo(a.canonical_metric_id)?.category
+    const cb = metricInfo(b.canonical_metric_id)?.category
+    if ((ca === undefined) !== (cb === undefined)) return ca === undefined ? 1 : -1
+    return (ca ?? '').localeCompare(cb ?? '') || nameOf(a).localeCompare(nameOf(b))
+  }
+
+  /** The latest reading of each test, per member. */
+  function latestPerSeries(memberIds: string[]): Reading[] {
+    const latest = new Map<string, Reading>()
+    for (const reading of readingsOf(memberIds).sort(byTime)) {
+      latest.set(`${reading.patient_id}|${seriesOf(reading)}`, reading)
+    }
+    return [...latest.values()].sort(byCategoryAndName)
+  }
+
+  function catalog(memberId: string): CatalogEntry[] {
+    const all = readingsOf([memberId]).sort(byTime)
+    return latestPerSeries([memberId]).map((latest) => {
+      const series = all.filter((r) => seriesOf(r) === seriesOf(latest))
+      return {
+        metric: metricInfo(latest.canonical_metric_id),
+        name: nameOf(latest),
+        reading_count: series.length,
+        first_collected_at: series[0]?.collected_at ?? latest.collected_at,
+        latest,
+      }
+    })
+  }
+
+  function overview(familyId: string, name: string) {
+    const list = [...members.values()]
+      .filter((m) => m.family_id === familyId)
+      .sort((a, b) => a.display_name.localeCompare(b.display_name))
+    return {
+      family_id: familyId,
+      name,
+      members: list.map((patient) => {
+        const latest = latestPerSeries([patient.id])
+        const times = readingsOf([patient.id])
+          .map((r) => r.collected_at)
+          .sort()
+        return {
+          patient,
+          latest_report_at: times.at(-1) ?? null,
+          tracked_metric_count: latest.length,
+          out_of_range: latest
+            .filter((r) => r.flag === 'low' || r.flag === 'high')
+            .map((r) => ({
+              ...r,
+              name: nameOf(r),
+              category: metricInfo(r.canonical_metric_id)?.category ?? null,
+            })),
+        }
+      }),
+    }
   }
 
   /** POST /patients/{id}/reports, sent through the fake XMLHttpRequest. */
@@ -237,6 +318,12 @@ export function fakeApi() {
       return json(204)
     }
 
+    match = /^\/families\/([^/]+)\/overview$/.exec(path)
+    if (match?.[1]) {
+      const family = families.get(match[1])
+      return family ? json(200, overview(family.id, family.name)) : notFound('Family')
+    }
+
     match = /^\/families\/([^/]+)\/patients$/.exec(path)
     if (match?.[1]) {
       const familyId = match[1]
@@ -271,6 +358,25 @@ export function fakeApi() {
       if (!members.has(memberId)) return notFound('Patient')
       const list = [...reports.values()].filter((r) => r.report.patient_id === memberId)
       return json(200, list.map(summary).reverse())
+    }
+
+    match = /^\/patients\/([^/]+)\/metrics(?:\/([^/]+))?$/.exec(path)
+    if (match?.[1]) {
+      const memberId = match[1]
+      if (!members.has(memberId)) return notFound('Patient')
+      const metricId = match[2]
+      if (!metricId) return json(200, catalog(memberId))
+      const metric = metricInfo(metricId)
+      if (!metric) return notFound('Metric')
+      const points = readingsOf([memberId])
+        .filter((r) => r.canonical_metric_id === metricId)
+        .sort(byTime)
+        .map((r) => ({
+          ...r,
+          reference_low_canonical: r.reference_low,
+          reference_high_canonical: r.reference_high,
+        }))
+      return json(200, { metric, points })
     }
 
     if (method === 'GET' && path === '/metric-dictionary') return json(200, DICTIONARY)

@@ -12,6 +12,9 @@ beforeEach(() => {
   signIn()
 })
 
+/** The family page's member cards (the overview below also names each member). */
+const membersSection = () => screen.findByRole('region', { name: 'Family members' })
+
 function setup() {
   const api = fakeApi()
   const family = api.addFamily('Rao family')
@@ -28,7 +31,7 @@ describe('members of a family', () => {
     const { family, amma } = setup()
     renderApp(`/families/${family.id}`)
 
-    const link = await screen.findByRole('link', { name: /Amma/ })
+    const link = await within(await membersSection()).findByRole('link', { name: /Amma/ })
     expect(link).toHaveTextContent('AmmaFemale, 58 years')
     expect(link).toHaveAttribute('href', `/families/${family.id}/members/${amma.id}`)
     expect(screen.getByText('1 member')).toBeInTheDocument()
@@ -44,7 +47,9 @@ describe('members of a family', () => {
     await user.click(within(dialog).getByLabelText('Male'))
     await user.click(within(dialog).getByRole('button', { name: 'Add member' }))
 
-    expect(await screen.findByRole('link', { name: /Ravi/ })).toHaveTextContent('RaviMale')
+    expect(
+      await within(await membersSection()).findByRole('link', { name: /Ravi/ }),
+    ).toHaveTextContent('RaviMale')
     expect(screen.getByText('2 members')).toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(api.writes()).toEqual([
@@ -156,7 +161,9 @@ describe('a member page', () => {
 
     expect(await screen.findByText('0 members')).toBeVisible()
     expect(router.state.location.pathname).toBe(`/families/${family.id}`)
-    expect(screen.queryByRole('link', { name: /Amma/ })).not.toBeInTheDocument()
+    expect(
+      within(await membersSection()).queryByRole('link', { name: /Amma/ }),
+    ).not.toBeInTheDocument()
     expect(api.members.size).toBe(0)
 
     // Back skips the deleted page (it was replaced); opening its address again shows

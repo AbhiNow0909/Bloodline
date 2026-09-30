@@ -135,3 +135,53 @@ export interface MetricDefinition {
   aliases: string[]
   description: string | null
 }
+
+// --- history (confirmed values) -------------------------------------------------------------
+
+/** A test the app knows, as attached to history. */
+export interface MetricInfo {
+  id: string
+  canonical_name: string
+  category: string
+  canonical_unit: string
+  description: string | null
+}
+
+/** A test the member has results for. Tests not in the dictionary have `metric` null and no
+ * history chart. */
+export interface CatalogEntry {
+  metric: MetricInfo | null
+  name: string
+  reading_count: number
+  first_collected_at: string
+  latest: Reading
+}
+
+/** A reading on a chart, with its range also in the test's canonical unit. */
+export interface HistoryPoint extends Reading {
+  reference_low_canonical: string | null
+  reference_high_canonical: string | null
+}
+
+export interface MetricHistory {
+  metric: MetricInfo
+  points: HistoryPoint[] // oldest first
+}
+
+export interface FlaggedReading extends Reading {
+  name: string
+  category: string | null
+}
+
+export interface MemberOverview {
+  patient: Member
+  latest_report_at: string | null
+  tracked_metric_count: number
+  out_of_range: FlaggedReading[]
+}
+
+export interface FamilyOverview {
+  family_id: string
+  name: string
+  members: MemberOverview[]
+}

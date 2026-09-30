@@ -475,7 +475,18 @@ Each phase ends with a manual commit by the user.
   - Verified in a real browser against the backend on a throwaway database with the **real Groq API and the synthetic PDF only** (never the real report): upload → read in ~2 s → review (4 rows, female ranges for a female member, male ranges and a sex-mismatch warning for a male member, name-mismatch warning) → correction → save → saved values and report list counts; desktop 1440 px and phone 375 px, no horizontal scroll, no console warnings, no server errors.
   - Review pass fixes: saved confirmation scrolled out of view (now focused), saved-values table hid Low/High on phones (now stacks), status badges stretched on phones, row cards made shorter, stale server errors cleared on edit, keyboard-only focus ring on *Choose a PDF*.
   - Follow-ups: **Phase 11** link saved values to per-test charts; the member page is where the latest-values dashboard goes. **Phase 16** the frontend's 10 MB pre-check mirrors the backend's default `MAX_UPLOAD_MB`; keep them in step if it changes. Known limits: a report stuck in "being read" after a server restart can only be deleted and uploaded again (the page says so after a minute); the review's Low/High preview mirrors the server's rules but only the saved result counts.
-- [ ] Phase 11 — Frontend history and charts
+- [x] Phase 11 — Frontend history and charts
+  - Dependencies: **Recharts 3.10** (in the approved stack) and **`react-is` 19** (Recharts' peer; npm had resolved v17, which does not recognise React 19 elements). The chart is code-split with `React.lazy`: a 105 kB (gzip) chunk loaded only on a test's page; the main bundle grew ~3 kB.
+  - `src/lib/`: history types, `api.catalog` / `metricHistory` / `familyOverview`, hooks `useCatalog`, `useMetricHistory`, `useFamilyOverview`. Saving or deleting a report now refreshes the member's report list, results and charts, and every family overview (`historyChanged`); the member's own details are left alone.
+  - Member page = results dashboard: "Outside the lab's range in the latest results" panel (words + arrow icons, range, date, "not a diagnosis" note) or "Every latest result is within the lab's range"; then every test's latest result grouped by category (`ResponsiveTable` with fixed column widths so categories line up; stacked with labels on phones); tests not in the dictionary are listed under "Other tests" without a chart link, with an honest note. Reports shown as a **timeline** (`<ol>`, year labels, rail dots).
+  - Test page `/families/:f/members/:m/tests/:metricId`: dictionary description, latest and previous result with flags, collected date, lab's range; **trend chart** (`src/history/TrendChart.tsx`): values in the canonical unit, the lab's range as a shaded band (one band when all ranges match, otherwise a per-point range area; open-ended ranges run to the chart edge), Low/High as down/up triangles, tooltip with the printed value, legend in words; the chart is `role="img"` with a spoken summary and the **table of every result** (newest first, printed value, canonical value when the unit differs, link to the report) is its accessible equivalent. Results that cannot be drawn are counted and left to the table. Not found for unknown tests or another family's address.
+  - `src/history/chartData.ts` (pure, unit-tested): round y-axis ticks (no floating-point noise, 0 floor for non-negative data), time domain with padding (±30 days for a single date), ≤ 6 date ticks, band construction, skipped points.
+  - Family page: "Outside the lab's range, by member" — one panel per member side by side (chip, latest report date, tests tracked, each flagged test with value, range and date, or "Every latest result is within the lab's range" / "No saved results yet").
+  - Shared `ResponsiveTable` (saved values now use it) and `NotDiagnosis` note.
+  - Tests: 147 (20 new): chart data (axis, bands, open ranges, no range, skipped, single point, tick limit); flows: empty dashboard, attention panel and category tables, all-in-range, dashboard refreshes after saving a report, test page (summary, chart label, legend, table rows and report links), undrawable results, not found (unknown test, other family), family overview panels. Pass in UTC−11…UTC+14; CI job replayed in a clean `node:24-slim` container; `npm audit --omit=dev` clean.
+  - Verified in a real browser against a throwaway backend + database with the real Groq API, using **synthetic reports only** (the committed fixture plus scratchpad variants with other dates/values, made by same-length text swaps; never committed): three years for a female member, two for a male member; dashboard, aligned tables, timeline, Ferritin chart (Low triangle, shaded range), tooltip, family overview with Low/High panels; desktop and 375 px, no horizontal scroll, no console warnings, all API responses 2xx. Your own `docker compose` stack and dev server were running on 8000/5173, so the check used ports 8001/5174 and never touched your dev database.
+  - Review pass fixes: category tables misaligned (fixed widths), dates wrapping, "range Up to 30" wording, previous result without its flag, overview sub-heading promised more than it showed, a misleading note about matching tests after saving.
+  - Follow-ups: **Phase 15** trend alerts and plain-language explanations go on the member dashboard and the family overview. Possible later: a date-range filter on the chart (the API already takes `start`/`end`); an error boundary if the chart chunk fails to load (it currently falls back to the router's error page). Known: a very wide reference range next to small values flattens the line (the whole band is always shown).
 - [ ] Phase 12 — Embeddings and vector search
 - [ ] Phase 13 — Query agent
 - [ ] Phase 14 — Frontend chat
@@ -483,7 +494,7 @@ Each phase ends with a manual commit by the user.
 - [ ] Phase 16 — Deployment (CD)
 - [ ] Phase 17 — Hardening and polish
 
-**Next step:** Phase 11 — Frontend history and charts (after the user commits Phase 10 and CI is green).
+**Next step:** Phase 12 — Embeddings and vector search (after the user commits Phase 11 and CI is green).
 
 ---
 
@@ -579,6 +590,13 @@ Use whatever is installed in this environment when it helps. Check what is avail
 | Report times shown in Indian time regardless of the device's time zone | Reports print Indian local time and the backend uses Indian calendar days |
 | Collection date entered in review is sent as noon Indian time on that day (now if it is today) | A date, not a time, is known; noon never crosses a day boundary in India and is never in the future |
 | Wider page layout opted into per route (`handle: { wide: true }`) | The review needs room for rows beside the PDF; other pages keep a readable width |
+| *Made during Phase 11:* | |
+| `react-is` 19 added as a direct dependency next to Recharts | Recharts' peer; npm otherwise resolves v17, which does not recognise React 19 elements |
+| Chart code-split with `React.lazy` | Recharts is ~105 kB gzipped; only test pages need it, so login and lists stay fast on mobile networks |
+| Chart is an image with a spoken summary; the table of every result is the accessible equivalent (Recharts' keyboard layer off) | Screen-reader users get exact values and dates in a table instead of an `application` widget |
+| Low/High drawn as down/up triangles, with a legend in words | Never colour-only (CLAUDE.md Section 9) |
+| Charts plot the canonical value and the canonically converted range | Different labs print different units; points and band must share one scale |
+| Family overview lives on the family page, below the members | One place per family; no extra navigation for 2–3 people |
 
 ### Deferred (revisit only if needed)
 - OCR fallback for scanned/photographed reports: Tesseract first, vision model only for low-confidence pages.

@@ -12,6 +12,7 @@ import { ErrorState, LoadingState } from '../components/States'
 import { ApiError } from '../lib/api'
 import { ageOn, formatDate, pluralize } from '../lib/format'
 import { useDeleteMember, useFamily, useMember, useUpdateMember } from '../lib/queries'
+import { LatestResults } from '../history/LatestResults'
 import { ReportList } from '../reports/ReportList'
 import { UploadReport } from '../reports/UploadReport'
 import { NotFound } from './NotFoundPage'
@@ -105,6 +106,13 @@ export function MemberPage() {
             </dd>
           </div>
         </dl>
+      </section>
+
+      <section aria-labelledby="results-heading" className="flex flex-col gap-4">
+        <h2 id="results-heading" className="text-lg font-semibold">
+          Latest results
+        </h2>
+        <LatestResults familyId={familyId} memberId={member.data.id} />
       </section>
 
       <section aria-labelledby="reports-heading" className="flex flex-col gap-4">

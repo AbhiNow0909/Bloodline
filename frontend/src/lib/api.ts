@@ -1,10 +1,13 @@
 import { session } from './session'
 import type {
+  CatalogEntry,
   ConfirmReportInput,
   Family,
+  FamilyOverview,
   Member,
   MemberInput,
   MetricDefinition,
+  MetricHistory,
   Reading,
   Report,
   ReportReview,
@@ -219,4 +222,9 @@ export const api = {
   reportFile: (id: string) => requestBlob(`/reports/${id}/file`, 'application/pdf'),
   reportReadings: (id: string) => request<Reading[]>(`/reports/${id}/metrics`),
   metricDictionary: () => request<MetricDefinition[]>('/metric-dictionary'),
+
+  catalog: (memberId: string) => request<CatalogEntry[]>(`/patients/${memberId}/metrics`),
+  metricHistory: (memberId: string, metricId: string) =>
+    request<MetricHistory>(`/patients/${memberId}/metrics/${metricId}`),
+  familyOverview: (familyId: string) => request<FamilyOverview>(`/families/${familyId}/overview`),
 }
