@@ -448,7 +448,20 @@ Each phase ends with a manual commit by the user.
   - Verified end to end in the production image with real Groq (synthetic PDF, throwaway DB): upload → confirm → reports, catalog, series, out-of-range and family overview all return the confirmed values.
   - Bug found by tests: `dict(result)` on a SQLAlchemy `Result` treats it as a mapping (it has `.keys()`); use `.all()` first.
   - Follow-ups: unmapped tests appear in the catalog but have no time-series endpoint (map them in review). **Phase 9**: install the `frontend-design` plugin (`/plugin install frontend-design@claude-plugins-official`); it is not installed yet and Section 9 asks to use it for all UI work.
-- [ ] Phase 9 — Frontend scaffold and auth
+- [x] Phase 9 — Frontend scaffold and auth
+  - Stack (versions checked against npm and Context7): Vite 8.3, React 19.3, React Router 8.4 (data mode: `createBrowserRouter` from `react-router`, `RouterProvider` from `react-router/dom`), TanStack Query 5.104, Tailwind 4.3 via `@tailwindcss/vite` (`@theme` tokens in `src/index.css`, no config file), TypeScript **6.0** (typescript-eslint 8.71 supports < 6.1, so not TS 7), ESLint 10 flat config (`strictTypeChecked`, react-hooks, react-refresh) + Prettier 3.9, Vitest 5 + jsdom 30 + Testing Library. Node 24 LTS (`frontend/.nvmrc`, `engines >= 22`). `create-vite` 9 now defaults to oxlint; ESLint kept as CLAUDE.md specifies.
+  - `src/lib/`: `api.ts` (fetch wrapper: bearer token, `ApiError` with user-facing messages, 422 → per-field messages, network/5xx messages, 204), `session.ts` (token + expiry in `localStorage`, expiry timer, sign-out follows across tabs via the `storage` event, stable `get()` for `useSyncExternalStore`), `queries.ts` (query keys, hooks, mutations and cache updates), `format.ts` (Indian date format, age from date of birth, stable tube-cap colour per member), `forms.ts` (focus the first invalid field).
+  - Routes (`src/routes.tsx`): `/login`; everything else behind `RequireAuth` (redirects to `/login`, then back to the page asked for; only same-app paths) → `AppLayout` → `/families`, `/families/:familyId`, `/families/:familyId/members/:memberId`, `*` not found. A member opened under another family's URL is "not found", like a 404.
+  - Privacy: logging out, an expired token (timer, or found expired on the next request) or a 401 ends the session and **clears the whole query cache** (also when another tab switches account), so nothing of one account is shown to the next. Not-found pages look the same whether something was deleted or belongs to someone else. The member-name hint says names are never sent to the AI (Principle 2).
+  - Screens (frontend-design skill): calm lab-vernacular look: "requisition paper" background, slate ink, EDTA-tube violet accent; red only for destructive actions (later: "high" flags). Families are folder cards with a tab, members are file cards with a folded corner and an initial on a blood-tube cap colour (decorative; the name is always shown). Breadcrumbs read like a path. 18px base type (Atkinson Hyperlegible Next, bundled, no third-party requests), ≥ 44px targets, visible focus rings, icons always with words, skip link, headings take focus on page change, native `<dialog>` modals (focus starts on Cancel in delete confirmations, which spell out what is deleted). Contrast checked: text ≥ 5.6:1, field borders 3.5–3.8:1 (WCAG 1.4.11).
+  - Member page shows details and an honest placeholder for reports (Phase 10–11).
+  - Tests (62, Vitest): session (expiry, restore, other tabs), API error mapping and token handling, formatting; flows through the real router and query client against an in-memory fake API (`src/test/fakeApi.ts`): sign-in and return, wrong password, validation and focus, sign-out clears the cache, 401 signs out, families list/create/duplicate 409/rename/delete with confirm, members add/validate/422/edit/delete, stale data never shown after a delete, not found. Passes in time zones from UTC−11 to UTC+14 (a clock-order bug made one file depend on the time of day; fixed).
+  - Verified in a real browser (Playwright) against the backend on a throwaway database: sign in, create families and members, edit, confirm dialog, log out; desktop and 375px wide, no horizontal scroll, no console warnings, CORS preflights OK.
+  - CI: new `frontend` job (`actions/setup-node@v7` with npm cache from `frontend/package-lock.json`; `npm ci`, lint, format check, typecheck, tests, build), validated with actionlint 1.7.12 and replayed in a clean `node:24-slim` container.
+  - `vite.config.ts` reads `.env` from the repo root (`envDir: '..'`); only `VITE_*` variables reach the browser.
+  - Code review (code-review skill's checks, run locally since there is no PR): fixed field-border contrast (1.4:1 → 3.8:1), an expired session is now ended on the next request instead of sending it without a token, and tests no longer wait for real retry delays.
+  - Tooling note: the GitHub MCP server failed to connect ("Authorization header is badly formatted") and the engineering plugin's MCP servers need authorization via `/mcp`; neither was needed for this phase.
+  - Follow-ups: **Phase 10** upload with `XMLHttpRequest` (raw PDF body, progress), fetch `/reports/{id}/file` as a blob with the bearer token for the preview; the member page's Reports placeholder is where the list goes. **Phase 16** Vercel needs an SPA rewrite (every path → `index.html`) so deep links and reloads work; add the Vercel origin to `CORS_ORIGINS`; consider a Content-Security-Policy header (the token is in `localStorage`; the app never renders HTML from data). Known limits: after logging out and signing in as another account, the "return to" page may be the previous account's page, which then shows "not found"; the date-of-birth check uses the browser's date while the server uses its own (a birth date of "today" near midnight may be refused by one and not the other).
 - [ ] Phase 10 — Frontend upload and review
 - [ ] Phase 11 — Frontend history and charts
 - [ ] Phase 12 — Embeddings and vector search
@@ -458,7 +471,7 @@ Each phase ends with a manual commit by the user.
 - [ ] Phase 16 — Deployment (CD)
 - [ ] Phase 17 — Hardening and polish
 
-**Next step:** Phase 9 — Frontend scaffold and auth (after the user commits Phase 8 and CI is green). Install the `frontend-design` plugin first.
+**Next step:** Phase 10 — Frontend upload and review (after the user commits Phase 9 and CI is green).
 
 ---
 
@@ -539,6 +552,14 @@ Use whatever is installed in this environment when it helps. Check what is avail
 | History services take explicit patient ids; routes resolve them through ownership checks | One scoping contract for the API and the agent tools (member or family) |
 | "Out of range" defaults to tests whose latest value is flagged | Answers "what needs attention now"; history of flagged values is available with `latest_only=false` |
 | Chart ranges converted to the canonical unit per point | Different labs print different units; the shaded band must match the plotted values |
+| *Made during Phase 9:* | |
+| ESLint + Prettier kept (not the oxlint default of `create-vite` 9) | CLAUDE.md specifies them; `strictTypeChecked` rules catch real bugs (floating promises, unsafe `any`) |
+| TypeScript pinned to 6.0 | typescript-eslint 8.71 supports TypeScript < 6.1 |
+| JWT in `localStorage` with its expiry; cleared on logout, expiry, 401, or another tab signing out | Survives reloads and new tabs for 24 h; the app never renders HTML from data (main XSS defence); an httpOnly cookie would need CSRF handling and cross-site cookies between Vercel and Render |
+| Whole query cache cleared whenever the session ends or changes account | Privacy between the family's accounts on a shared device |
+| No icon library; a few hand-drawn inline SVG icons, always next to words | No dependency for eight icons; never icon-only or colour-only meaning |
+| Self-hosted font (Atkinson Hyperlegible Next via `@fontsource`) | Legible for older readers; no requests to font CDNs (privacy) |
+| Frontend tests use an in-memory fake of the API behind `fetch` | Whole flows through the real router, query client and session without a backend; the real API contract is covered by the backend tests and the CI smoke test |
 
 ### Deferred (revisit only if needed)
 - OCR fallback for scanned/photographed reports: Tesseract first, vision model only for low-confidence pages.

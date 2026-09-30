@@ -1,0 +1,80 @@
+/* Self-hosted: no request to any font CDN (privacy). */
+@import '@fontsource-variable/atkinson-hyperlegible-next';
+@import 'tailwindcss';
+
+@theme {
+  /* Lab vernacular: requisition paper, slate ink, EDTA-tube violet. Red is reserved for
+     destructive actions (and, later, for "high" flags) so the brand never reads as alarm. */
+  --color-paper: #f6f5f9;
+  --color-surface: #ffffff;
+  --color-ink: #1d2433;
+  --color-muted: #5b6275;
+  --color-line: #dad7e6;
+  /* Borders that identify a control (text fields): 3.8:1 on white, 3.5:1 on paper. */
+  --color-field: #7d8294;
+  --color-edta: #4c3f91;
+  --color-edta-soft: #ece9f7;
+  --color-alert: #a4262c;
+  --color-alert-soft: #fbeceb;
+
+  /* Blood-tube cap colours, used only as identity chips next to a member's initial. */
+  --color-cap-lavender: #b9aee0;
+  --color-cap-gold: #e8c867;
+  --color-cap-grey: #c3c7cf;
+  --color-cap-blue: #a9cbea;
+  --color-cap-green: #a8cfb2;
+
+  --font-sans:
+    'Atkinson Hyperlegible Next Variable', 'Atkinson Hyperlegible Next', ui-sans-serif, system-ui,
+    sans-serif;
+
+  /* 18px base for older readers; a 1.25 scale above it. */
+  --text-base: 1.125rem;
+  --text-base--line-height: 1.6;
+  --text-lg: 1.40625rem;
+  --text-lg--line-height: 1.45;
+  --text-xl: 1.7578rem;
+  --text-xl--line-height: 1.3;
+  --text-2xl: 2.1973rem;
+  --text-2xl--line-height: 1.2;
+  --text-sm: 1rem;
+  --text-sm--line-height: 1.5;
+}
+
+@layer base {
+  html {
+    background-color: var(--color-paper);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 100%;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    font-size: var(--text-base);
+    line-height: var(--text-base--line-height);
+  }
+
+  :focus-visible {
+    outline: 3px solid var(--color-edta);
+    outline-offset: 3px;
+    border-radius: 0.25rem;
+  }
+
+  dialog::backdrop {
+    background: rgb(29 36 51 / 0.45);
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    dialog[open] {
+      animation: dialog-in 140ms ease-out;
+    }
+  }
+}
+
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.5rem);
+  }
+}
