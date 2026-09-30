@@ -98,7 +98,8 @@ React SPA (Vercel) ──HTTPS + JWT──▶ FastAPI (Docker on Render)
 │   └── src/
 │       ├── lib/            # API client, session, queries, formatting
 │       ├── components/     # shared UI (buttons, fields, dialogs, folder/file cards)
-│       ├── pages/          # login, families, family, member, not found
+│       ├── pages/          # login, families, family, member, report, not found
+│       ├── reports/        # upload, report list, review form, saved values, PDF preview
 │       ├── auth/           # route guard
 │       └── test/           # test setup, fake API
 └── .github/workflows/      # CI (deployment comes in Phase 16)
@@ -275,6 +276,17 @@ The app calls the API at `VITE_API_BASE_URL` from the repo-root `.env` (default
 - **Families** are folders: create, rename and delete them. **Members** are the files in a
   family: add them (name, sex, optional date of birth), edit and delete them. Deleting asks
   for confirmation and says what will be removed.
+- **Reports**: on a member's page, choose or drop a PDF (up to 10 MB). The page shows the
+  upload's progress, then follows the report while it is read (usually a few seconds). Each
+  report's status is shown in words: being read, needs your review, couldn't be read (with the
+  reason, *Try reading it again* and *Delete*), saved.
+- **Review**: every value found is shown with its printed range, the range used for the
+  member's sex, and a Low/High preview, next to the original PDF (on wide screens; *Open the
+  PDF* everywhere). Correct names, results, units and ranges, match unknown tests to the
+  metric dictionary, leave rows out or add a test that was missed, and enter the collection
+  date if the report did not print one. Warnings that the report may be for someone else are
+  shown first. Nothing is saved until you press *Save*; leaving with unsaved corrections asks
+  first. The server recomputes every number and flag from what you saved.
 - The sign-in token is kept in the browser's `localStorage` until it expires (24 h by
   default), so a reload stays signed in. Logging out, an expired token or a rejected token
   signs out every tab and clears everything cached in the page.

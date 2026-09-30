@@ -6,6 +6,8 @@ import {
   capColourFor,
   describeMember,
   formatDate,
+  formatDateTime,
+  indianDay,
   initialOf,
   parseDateOnly,
   pluralize,
@@ -20,6 +22,14 @@ describe('dates', () => {
   it('formats dates the Indian way without shifting the day', () => {
     expect(formatDate('1968-03-01')).toBe('1 Mar 1968')
     expect(formatDate('2025-12-31')).toBe('31 Dec 2025')
+  })
+
+  it('shows timestamps in Indian time, whatever the device time zone', () => {
+    // 20:00 UTC on 2 Mar is 01:30 on 3 Mar in India.
+    expect(formatDate('2025-03-02T20:00:00Z')).toBe('3 Mar 2025')
+    expect(formatDateTime('2025-03-03T02:35:00Z')).toBe('3 Mar 2025, 8:05 am')
+    expect(indianDay('2025-03-02T20:00:00Z')).toBe('2025-03-03')
+    expect(indianDay(new Date('2025-03-02T18:29:59Z'))).toBe('2025-03-02')
   })
 
   it.each([

@@ -26,3 +26,9 @@ afterEach(() => {
   vi.unstubAllGlobals()
   vi.useRealTimers()
 })
+
+// Object URLs (for showing a report's PDF): the test environment's own version accepts only
+// jsdom's Blob class, not the Blob that fetch's Response returns.
+let nextObjectUrl = 0
+URL.createObjectURL = () => `blob:test/${String(nextObjectUrl++)}`
+URL.revokeObjectURL = () => {}

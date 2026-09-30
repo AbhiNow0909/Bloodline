@@ -37,3 +37,101 @@ export interface MemberInput {
   sex: Sex
   date_of_birth: string | null
 }
+
+// --- reports -------------------------------------------------------------------------------
+// Decimals arrive as exact strings (e.g. "13.50"), never floats.
+
+export type ReportStatus = 'processing' | 'pending_review' | 'confirmed' | 'failed'
+export type MetricFlag = 'low' | 'normal' | 'high' | 'unknown'
+
+export interface Report {
+  id: string
+  patient_id: string
+  status: ReportStatus
+  lab_name: string | null
+  collected_at: string | null
+  failure_reason: string | null
+  created_at: string
+}
+
+export interface ReportSummary extends Report {
+  metric_count: number
+  flagged_count: number
+}
+
+/** One extracted row, waiting for review. */
+export interface ExtractedRow {
+  raw_name: string
+  panel: string | null
+  technology: string | null
+  method: string | null
+  sample_type: string | null
+  value_text: string
+  value_numeric: string | null
+  unit: string | null
+  canonical_metric_id: string | null
+  canonical_name: string | null
+  value_canonical: string | null
+  unit_canonical: string | null
+  reference_text: string | null
+  reference_low: string | null
+  reference_high: string | null
+  reference_label: string | null
+  flag: MetricFlag
+  warnings: string[]
+}
+
+export interface ReportReview {
+  report: Report
+  printed_age_years: number | null
+  printed_sex: Sex | null
+  sample_types: string[]
+  warnings: string[]
+  rows: ExtractedRow[]
+}
+
+/** A reviewed row sent to POST /reports/{id}/confirm. The server derives every number. */
+export interface ConfirmedRow {
+  raw_name: string
+  canonical_metric_id: string | null
+  value_text: string
+  unit: string | null
+  reference_low: string | null
+  reference_high: string | null
+  reference_text: string | null
+  sample_type: string | null
+  method: string | null
+}
+
+export interface ConfirmReportInput {
+  collected_at?: string
+  metrics: ConfirmedRow[]
+}
+
+/** A saved value. */
+export interface Reading {
+  patient_id: string
+  report_id: string
+  collected_at: string
+  canonical_metric_id: string | null
+  raw_name: string
+  value_text: string | null
+  value_numeric: string | null
+  unit: string | null
+  value_canonical: string | null
+  unit_canonical: string | null
+  reference_low: string | null
+  reference_high: string | null
+  reference_text: string | null
+  flag: MetricFlag
+}
+
+/** A test the app knows (the metric dictionary). */
+export interface MetricDefinition {
+  id: string
+  canonical_name: string
+  category: string
+  canonical_unit: string
+  aliases: string[]
+  description: string | null
+}

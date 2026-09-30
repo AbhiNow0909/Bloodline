@@ -8,10 +8,12 @@ import { Icon } from '../components/Icon'
 import { MemberChip } from '../components/MemberChip'
 import { MemberForm } from '../components/MemberForm'
 import { PageHeader } from '../components/PageHeader'
-import { EmptyState, ErrorState, LoadingState } from '../components/States'
+import { ErrorState, LoadingState } from '../components/States'
 import { ApiError } from '../lib/api'
 import { ageOn, formatDate, pluralize } from '../lib/format'
 import { useDeleteMember, useFamily, useMember, useUpdateMember } from '../lib/queries'
+import { ReportList } from '../reports/ReportList'
+import { UploadReport } from '../reports/UploadReport'
 import { NotFound } from './NotFoundPage'
 
 type OpenDialog = 'edit' | 'delete' | null
@@ -105,15 +107,13 @@ export function MemberPage() {
         </dl>
       </section>
 
-      <section aria-labelledby="reports-heading" className="flex flex-col gap-3">
+      <section aria-labelledby="reports-heading" className="flex flex-col gap-4">
         <h2 id="reports-heading" className="flex items-center gap-2 text-lg font-semibold">
           <Icon name="file" className="size-6 text-edta" />
           Reports
         </h2>
-        <EmptyState>
-          No reports yet. Soon you will be able to add {name}'s PDF lab reports here and see how
-          each test changes over time.
-        </EmptyState>
+        <UploadReport familyId={familyId} memberId={member.data.id} memberName={name} />
+        <ReportList familyId={familyId} memberId={member.data.id} />
       </section>
 
       <Dialog open={dialog === 'edit'} onClose={close} title={`Edit ${name}'s details`}>

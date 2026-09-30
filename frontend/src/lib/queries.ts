@@ -1,12 +1,20 @@
 import { QueryClient, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useSyncExternalStore } from 'react'
+import { useState, useSyncExternalStore } from 'react'
 
-import { ApiError, api } from './api'
+import { ApiError, api, uploadReport } from './api'
+import { objectUrlFor, releaseObjectUrlsWith } from './objectUrls'
 import { session, type Session } from './session'
-import type { Family, Member, MemberInput } from './types'
+import type {
+  ConfirmReportInput,
+  Family,
+  Member,
+  MemberInput,
+  Report,
+  ReportSummary,
+} from './types'
 
 export function createQueryClient(): QueryClient {
-  return new QueryClient({
+  const client = new QueryClient({
     defaultOptions: {
       queries: {
         staleTime: 30_000,
@@ -15,6 +23,8 @@ export function createQueryClient(): QueryClient {
       },
     },
   })
+  releaseObjectUrlsWith(client)
+  return client
 }
 
 export function useSession(): Session | null {
@@ -38,7 +48,16 @@ export const keys = {
   family: (id: string) => ['families', id] as const,
   members: (familyId: string) => ['families', familyId, 'members'] as const,
   member: (id: string) => ['members', id] as const,
+  reports: (memberId: string) => ['members', memberId, 'reports'] as const,
+  report: (id: string) => ['reports', id] as const,
+  review: (id: string) => ['reports', id, 'review'] as const,
+  readings: (id: string) => ['reports', id, 'readings'] as const,
+  reportFile: (id: string) => ['reports', id, 'file'] as const,
+  dictionary: ['metric-dictionary'] as const,
 }
+
+/** How often a report being read is checked again. Tests shorten it. */
+export const polling = { intervalMs: 2_000 }
 
 export const useMe = () => useQuery({ queryKey: keys.me, queryFn: api.me })
 export const useFamilies = () => useQuery({ queryKey: keys.families, queryFn: api.families })
@@ -127,6 +146,114 @@ export function useDeleteMember(id: string, familyId: string) {
         old?.filter((m) => m.id !== id),
       )
       return markDeleted(client)
+    },
+  })
+}
+
+// --- reports -------------------------------------------------------------------------------
+
+const isProcessing = (report: Report | undefined) => report?.status === 'processing'
+
+/** A member's reports; checked again every few seconds while any is still being read. */
+export const useReports = (memberId: string) =>
+  useQuery({
+    queryKey: keys.reports(memberId),
+    queryFn: () => api.reports(memberId),
+    refetchInterval: (query) => (query.state.data?.some(isProcessing) ? polling.intervalMs : false),
+  })
+
+/** One report's status; checked again every few seconds while it is being read. */
+export const useReport = (id: string) =>
+  useQuery({
+    queryKey: keys.report(id),
+    queryFn: () => api.report(id),
+    refetchInterval: (query) => (isProcessing(query.state.data) ? polling.intervalMs : false),
+  })
+
+/** The extracted rows. Loaded once: refetching would not change them, and the review form
+ * keeps its own edited copy. */
+export const useReview = (id: string, enabled: boolean) =>
+  useQuery({
+    queryKey: keys.review(id),
+    queryFn: () => api.review(id),
+    enabled,
+    staleTime: Infinity,
+  })
+
+export const useReadings = (id: string, enabled: boolean) =>
+  useQuery({ queryKey: keys.readings(id), queryFn: () => api.reportReadings(id), enabled })
+
+/** Every test the app knows; it only changes when the backend is re-seeded. */
+export const useMetricDictionary = () =>
+  useQuery({ queryKey: keys.dictionary, queryFn: api.metricDictionary, staleTime: Infinity })
+
+/** The original PDF as a local object URL (fetched with the session's token; the file never
+ * leaves this browser). Kept for a minute after it is last shown, then released. */
+export function useReportFileUrl(id: string) {
+  const file = useQuery({
+    queryKey: keys.reportFile(id),
+    queryFn: () => api.reportFile(id),
+    staleTime: Infinity,
+    gcTime: 60_000,
+  })
+  return {
+    url: file.data ? objectUrlFor(file.data) : null,
+    isError: file.isError,
+    error: file.error,
+  }
+}
+
+/** Put a report's new state into the cache, and refresh the member's report list. */
+function reportChanged(client: QueryClient, report: Report) {
+  client.setQueryData(keys.report(report.id), report)
+  return client.invalidateQueries({ queryKey: keys.reports(report.patient_id) })
+}
+
+/** Upload a PDF; `progress` is 0–1 while the file is being sent. */
+export function useUploadReport(memberId: string) {
+  const client = useQueryClient()
+  const [progress, setProgress] = useState(0)
+  const mutation = useMutation({
+    mutationFn: (file: Blob) => {
+      setProgress(0)
+      return uploadReport(memberId, file, setProgress)
+    },
+    onSuccess: (report) => reportChanged(client, report),
+  })
+  return { ...mutation, progress }
+}
+
+export function useConfirmReport(id: string) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (input: ConfirmReportInput) => api.confirmReport(id, input),
+    onSuccess: (report) => {
+      client.removeQueries({ queryKey: keys.review(id) })
+      return reportChanged(client, report)
+    },
+  })
+}
+
+export function useRetryReport(id: string) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: () => api.retryReport(id),
+    onSuccess: (report) => reportChanged(client, report),
+  })
+}
+
+export function useDeleteReport(report: Pick<Report, 'id' | 'patient_id'>) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: () => api.deleteReport(report.id),
+    onSuccess: () => {
+      client.setQueryData<ReportSummary[]>(keys.reports(report.patient_id), (old) =>
+        old?.filter((r) => r.id !== report.id),
+      )
+      return Promise.all([
+        client.invalidateQueries({ queryKey: keys.reports(report.patient_id) }),
+        client.invalidateQueries({ queryKey: keys.report(report.id), refetchType: 'none' }),
+      ])
     },
   })
 }

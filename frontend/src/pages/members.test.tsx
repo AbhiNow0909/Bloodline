@@ -101,7 +101,7 @@ describe('members of a family', () => {
 })
 
 describe('a member page', () => {
-  it('shows the path, details and an honest placeholder for reports', async () => {
+  it('shows the path, details and the reports section', async () => {
     const { family, amma } = setup()
     renderApp(`/families/${family.id}/members/${amma.id}`)
 
@@ -114,7 +114,8 @@ describe('a member page', () => {
     expect(within(breadcrumb).getByText('Amma')).toHaveAttribute('aria-current', 'page')
     expect(screen.getByText('1 Mar 1968')).toBeVisible()
     expect(screen.getByText('58 years')).toBeVisible()
-    expect(screen.getByText(/No reports yet/)).toBeVisible()
+    expect(await screen.findByText('No reports yet.')).toBeVisible()
+    expect(screen.getByLabelText('Choose a PDF')).toBeInTheDocument()
   })
 
   it('edits details, and clearing the date of birth sends null', async () => {

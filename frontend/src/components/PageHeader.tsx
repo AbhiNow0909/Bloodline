@@ -6,7 +6,7 @@ interface PageHeaderProps {
   /** The path to this page; omitted at the top level, where it would only repeat the title. */
   crumbs?: Crumb[]
   title: string
-  subtitle?: string
+  subtitle?: ReactNode
   leading?: ReactNode
   actions?: ReactNode
 }
@@ -35,7 +35,7 @@ export function PageHeader({ crumbs, title, subtitle, leading, actions }: PageHe
             >
               {title}
             </h1>
-            {subtitle && <p className="mt-1 text-muted">{subtitle}</p>}
+            {subtitle && <div className="mt-1 text-muted">{subtitle}</div>}
           </div>
         </div>
         {actions && <div className="flex flex-wrap gap-3">{actions}</div>}

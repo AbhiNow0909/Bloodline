@@ -1,5 +1,17 @@
 import { session } from './session'
-import type { Family, Member, MemberInput, TokenResponse, User } from './types'
+import type {
+  ConfirmReportInput,
+  Family,
+  Member,
+  MemberInput,
+  MetricDefinition,
+  Reading,
+  Report,
+  ReportReview,
+  ReportSummary,
+  TokenResponse,
+  User,
+} from './types'
 
 export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000').replace(
   /\/+$/,
@@ -11,12 +23,24 @@ export class ApiError extends Error {
   readonly status: number
   /** Messages for individual fields, from 422 validation errors (keyed by field name). */
   readonly fieldErrors: Readonly<Record<string, string>>
+  /** The same messages keyed by their full path in the body, e.g. "metrics.3.reference_low". */
+  readonly pathErrors: Readonly<Record<string, string>>
+  /** The response's `detail`, for errors that carry data (e.g. the existing report's id). */
+  readonly detail: unknown
 
-  constructor(status: number, message: string, fieldErrors: Record<string, string> = {}) {
+  constructor(
+    status: number,
+    message: string,
+    fieldErrors: Record<string, string> = {},
+    pathErrors: Record<string, string> = {},
+    detail: unknown = null,
+  ) {
     super(message)
     this.name = 'ApiError'
     this.status = status
     this.fieldErrors = fieldErrors
+    this.pathErrors = pathErrors
+    this.detail = detail
   }
 }
 
@@ -33,47 +57,63 @@ interface ValidationIssue {
   msg?: string
 }
 
-async function toApiError(response: Response): Promise<ApiError> {
-  let detail: unknown = null
-  try {
-    detail = ((await response.json()) as { detail?: unknown }).detail
-  } catch {
-    // not JSON (e.g. a proxy error page)
-  }
-  if (typeof detail === 'string') return new ApiError(response.status, detail)
+/** Turn an error response's status and parsed JSON body into an ApiError. */
+function errorFromBody(status: number, body: unknown): ApiError {
+  const detail =
+    typeof body === 'object' && body !== null && 'detail' in body ? body.detail : undefined
+  if (typeof detail === 'string') return new ApiError(status, detail, {}, {}, detail)
   if (Array.isArray(detail)) {
     const fieldErrors: Record<string, string> = {}
+    const pathErrors: Record<string, string> = {}
     for (const issue of detail as ValidationIssue[]) {
-      const field = issue.loc?.at(-1)
-      if (typeof field === 'string' && issue.msg && !(field in fieldErrors)) {
-        fieldErrors[field] = issue.msg.replace(/^Value error, /, '')
-      }
+      if (!issue.msg || !Array.isArray(issue.loc)) continue
+      const message = issue.msg.replace(/^Value error, /, '')
+      const path = issue.loc.filter((part, index) => !(index === 0 && part === 'body'))
+      const field = path.at(-1)
+      if (typeof field === 'string' && !(field in fieldErrors)) fieldErrors[field] = message
+      const key = path.join('.')
+      if (key && !(key in pathErrors)) pathErrors[key] = message
     }
-    return new ApiError(response.status, 'Some details need fixing.', fieldErrors)
+    return new ApiError(status, 'Some details need fixing.', fieldErrors, pathErrors, detail)
   }
   if (typeof detail === 'object' && detail !== null && 'message' in detail) {
-    return new ApiError(response.status, String(detail.message))
+    return new ApiError(status, String(detail.message), {}, {}, detail)
   }
   return new ApiError(
-    response.status,
-    response.status >= 500
+    status,
+    status >= 500
       ? 'Something went wrong on the server. Try again in a minute.'
-      : `The request failed (${response.status}).`,
+      : `The request failed (${status}).`,
   )
+}
+
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text) as unknown
+  } catch {
+    return null // not JSON (e.g. a proxy error page)
+  }
+}
+
+/** The token to send, ending a session whose token has expired. */
+function currentToken(): string | undefined {
+  const current = session.get()
+  // The expiry timer can fire late (e.g. after the computer sleeps): end the session now.
+  if (current !== null && current.expiresAt <= Date.now()) session.clear()
+  return session.get()?.token
 }
 
 interface RequestOptions {
   method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'
   json?: unknown
   signal?: AbortSignal
+  accept?: string
 }
 
-export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const current = session.get()
-  // The expiry timer can fire late (e.g. after the computer sleeps): end the session now.
-  if (current !== null && current.expiresAt <= Date.now()) session.clear()
-  const token = session.get()?.token
-  const headers: Record<string, string> = { Accept: 'application/json' }
+/** Send a request with the session's token; return the response if it succeeded. */
+async function send(path: string, options: RequestOptions = {}): Promise<Response> {
+  const token = currentToken()
+  const headers: Record<string, string> = { Accept: options.accept ?? 'application/json' }
   if (token) headers.Authorization = `Bearer ${token}`
   if (options.json !== undefined) headers['Content-Type'] = 'application/json'
 
@@ -92,9 +132,59 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
 
   // An expired or revoked token: sign out everywhere; the router sends the user to login.
   if (response.status === 401 && token) session.clear()
-  if (!response.ok) throw await toApiError(response)
+  if (!response.ok) throw errorFromBody(response.status, parseJson(await response.text()))
+  return response
+}
+
+export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const response = await send(path, options)
   if (response.status === 204) return undefined as T
   return (await response.json()) as T
+}
+
+async function requestBlob(path: string, accept: string): Promise<Blob> {
+  return (await send(path, { accept })).blob()
+}
+
+// --- uploads -------------------------------------------------------------------------------
+
+/** Matches the backend's default MAX_UPLOAD_MB; the server enforces its own limit too. */
+export const MAX_UPLOAD_MB = 10
+
+export const UPLOAD_NETWORK_ERROR =
+  "The upload didn't finish. Check your internet connection and try again."
+
+/** Upload a PDF as the raw request body. Uses XMLHttpRequest because fetch cannot report
+ * upload progress; `onProgress` receives a fraction from 0 to 1. */
+export function uploadReport(
+  memberId: string,
+  file: Blob,
+  onProgress?: (fraction: number) => void,
+): Promise<Report> {
+  return new Promise((resolve, reject) => {
+    const token = currentToken()
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', `${API_BASE_URL}/patients/${memberId}/reports`)
+    xhr.setRequestHeader('Content-Type', 'application/pdf')
+    xhr.setRequestHeader('Accept', 'application/json')
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && event.total > 0) onProgress?.(event.loaded / event.total)
+    }
+    xhr.onload = () => {
+      const body = parseJson(xhr.responseText)
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(body as Report)
+        return
+      }
+      if (xhr.status === 401 && token) session.clear()
+      reject(errorFromBody(xhr.status, body))
+    }
+    xhr.onerror = () => {
+      reject(new ApiError(0, UPLOAD_NETWORK_ERROR))
+    }
+    xhr.send(file)
+  })
 }
 
 // --- endpoints ------------------------------------------------------------------------------
@@ -118,4 +208,15 @@ export const api = {
   updateMember: (id: string, input: Partial<MemberInput>) =>
     request<Member>(`/patients/${id}`, { method: 'PATCH', json: input }),
   deleteMember: (id: string) => request<undefined>(`/patients/${id}`, { method: 'DELETE' }),
+
+  reports: (memberId: string) => request<ReportSummary[]>(`/patients/${memberId}/reports`),
+  report: (id: string) => request<Report>(`/reports/${id}`),
+  review: (id: string) => request<ReportReview>(`/reports/${id}/review`),
+  confirmReport: (id: string, input: ConfirmReportInput) =>
+    request<Report>(`/reports/${id}/confirm`, { method: 'POST', json: input }),
+  retryReport: (id: string) => request<Report>(`/reports/${id}/retry`, { method: 'POST' }),
+  deleteReport: (id: string) => request<undefined>(`/reports/${id}`, { method: 'DELETE' }),
+  reportFile: (id: string) => requestBlob(`/reports/${id}/file`, 'application/pdf'),
+  reportReadings: (id: string) => request<Reading[]>(`/reports/${id}/metrics`),
+  metricDictionary: () => request<MetricDefinition[]>('/metric-dictionary'),
 }

@@ -462,7 +462,19 @@ Each phase ends with a manual commit by the user.
   - Code review (code-review skill's checks, run locally since there is no PR): fixed field-border contrast (1.4:1 → 3.8:1), an expired session is now ended on the next request instead of sending it without a token, and tests no longer wait for real retry delays.
   - Tooling note: the GitHub MCP server failed to connect ("Authorization header is badly formatted") and the engineering plugin's MCP servers need authorization via `/mcp`; neither was needed for this phase.
   - Follow-ups: **Phase 10** upload with `XMLHttpRequest` (raw PDF body, progress), fetch `/reports/{id}/file` as a blob with the bearer token for the preview; the member page's Reports placeholder is where the list goes. **Phase 16** Vercel needs an SPA rewrite (every path → `index.html`) so deep links and reloads work; add the Vercel origin to `CORS_ORIGINS`; consider a Content-Security-Policy header (the token is in `localStorage`; the app never renders HTML from data). Known limits: after logging out and signing in as another account, the "return to" page may be the previous account's page, which then shows "not found"; the date-of-birth check uses the browser's date while the server uses its own (a birth date of "today" near midnight may be refused by one and not the other).
-- [ ] Phase 10 — Frontend upload and review
+- [x] Phase 10 — Frontend upload and review
+  - Frontend only; the backend already had every endpoint. No new dependencies.
+  - `src/lib/api.ts`: report endpoints; `uploadReport` via `XMLHttpRequest` (raw `application/pdf` body, bearer token, upload progress, same error mapping as fetch); PDF download as a `Blob`; `ApiError` now also keeps `pathErrors` (422 messages by full path, e.g. `metrics.3.reference_low`) and `detail` (e.g. the duplicate's `report_id`). An expired session is ended before any request, upload included.
+  - `src/lib/values.ts`: `parseNumber`, exact decimal comparison, inclusive-bounds `previewFlag`, `parseBound` (≤ 6 decimals, ≤ 18 digits) — same rules as the backend's normalization, used only for the Low/High preview while editing; the server recomputes every number and flag on save.
+  - `src/lib/format.ts`: timestamps shown in **Indian time** whatever the device's time zone (`formatDate`, `formatDateTime`, `indianDay`), matching the reports and the backend's calendar days.
+  - `src/lib/queries.ts`: report hooks; `useReport`/`useReports` poll every 2 s only while a report is being read; the review is loaded once (the form keeps its own copy); the metric dictionary is cached for the session. `src/lib/objectUrls.ts`: the PDF's object URL lives as long as the cached blob (a minute after it was last shown) and is revoked when the cache drops it, including on logout.
+  - Member page: upload drop zone (button or drag-and-drop; PDF type, empty and 10 MB checks before sending; duplicate → link to the existing report) and the report list with statuses in words (being read / needs your review / couldn't be read / saved, plus value and out-of-range counts).
+  - Report page `/families/:f/members/:m/reports/:r` (a wider layout via the route's `handle: { wide: true }`): being read (live, with a hint after a minute), couldn't be read (reason, *Try reading it again*, delete), review, saved values (stacked on phones so Low/High is never scrolled away; "not a diagnosis" note). Delete from any state, with confirmation. Report under another member's URL → not found.
+  - Review (`src/reports/`): per-row cards (name, dictionary match, result, unit, range from/to; printed range and which line was used; panel, sample type, method; warnings in words; Low/High preview), person-mismatch warnings first ("Check this first"), leave out / include again, add a missed test, collection date (required when the report had none; sent as noon Indian time, or now for today), checks mirroring the backend's limits with focus on the first problem, server 422 messages shown on the right row, sticky save bar, and the original PDF beside the rows on wide screens (browser's own viewer in an iframe; *Open the PDF* link everywhere). `useBlocker` + `beforeunload` ask before leaving with unsaved corrections (not after deleting the report or when signed out). After saving, the confirmation takes focus.
+  - Tests: 127 (65 new): values parity cases, draft logic, upload checks, Indian-time formatting; flows against the fake API (now with reports, dictionary, PDF file and a fake `XMLHttpRequest`): list statuses, upload with progress → processing → review, dropped non-PDF, duplicate link, dropped connection, review display and PDF fetched with the token, save with corrections/matches/left-out rows, missing collection date, validation and focus, added test, server row errors (and cleared on edit), leave-without-saving dialog, failed → retry, delete while editing, not found. Pass in time zones UTC−11 to UTC+14; CI job replayed in a clean `node:24-slim` container.
+  - Verified in a real browser against the backend on a throwaway database with the **real Groq API and the synthetic PDF only** (never the real report): upload → read in ~2 s → review (4 rows, female ranges for a female member, male ranges and a sex-mismatch warning for a male member, name-mismatch warning) → correction → save → saved values and report list counts; desktop 1440 px and phone 375 px, no horizontal scroll, no console warnings, no server errors.
+  - Review pass fixes: saved confirmation scrolled out of view (now focused), saved-values table hid Low/High on phones (now stacks), status badges stretched on phones, row cards made shorter, stale server errors cleared on edit, keyboard-only focus ring on *Choose a PDF*.
+  - Follow-ups: **Phase 11** link saved values to per-test charts; the member page is where the latest-values dashboard goes. **Phase 16** the frontend's 10 MB pre-check mirrors the backend's default `MAX_UPLOAD_MB`; keep them in step if it changes. Known limits: a report stuck in "being read" after a server restart can only be deleted and uploaded again (the page says so after a minute); the review's Low/High preview mirrors the server's rules but only the saved result counts.
 - [ ] Phase 11 — Frontend history and charts
 - [ ] Phase 12 — Embeddings and vector search
 - [ ] Phase 13 — Query agent
@@ -471,7 +483,7 @@ Each phase ends with a manual commit by the user.
 - [ ] Phase 16 — Deployment (CD)
 - [ ] Phase 17 — Hardening and polish
 
-**Next step:** Phase 10 — Frontend upload and review (after the user commits Phase 9 and CI is green).
+**Next step:** Phase 11 — Frontend history and charts (after the user commits Phase 10 and CI is green).
 
 ---
 
@@ -560,6 +572,13 @@ Use whatever is installed in this environment when it helps. Check what is avail
 | No icon library; a few hand-drawn inline SVG icons, always next to words | No dependency for eight icons; never icon-only or colour-only meaning |
 | Self-hosted font (Atkinson Hyperlegible Next via `@fontsource`) | Legible for older readers; no requests to font CDNs (privacy) |
 | Frontend tests use an in-memory fake of the API behind `fetch` | Whole flows through the real router, query client and session without a backend; the real API contract is covered by the backend tests and the CI smoke test |
+| *Made during Phase 10:* | |
+| PDF preview with the browser's own viewer (iframe on a local object URL) plus an *Open the PDF* link; no pdf.js | No new dependency; phones that cannot show PDFs inline open the device's viewer through the link |
+| Upload with `XMLHttpRequest`, not fetch | fetch cannot report upload progress |
+| The review's Low/High preview mirrors the backend's parsing in TypeScript; the server stays the source of truth | Immediate feedback while correcting values, without trusting the client with saved numbers |
+| Report times shown in Indian time regardless of the device's time zone | Reports print Indian local time and the backend uses Indian calendar days |
+| Collection date entered in review is sent as noon Indian time on that day (now if it is today) | A date, not a time, is known; noon never crosses a day boundary in India and is never in the future |
+| Wider page layout opted into per route (`handle: { wide: true }`) | The review needs room for rows beside the PDF; other pages keep a readable width |
 
 ### Deferred (revisit only if needed)
 - OCR fallback for scanned/photographed reports: Tesseract first, vision model only for low-confidence pages.
