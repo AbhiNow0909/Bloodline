@@ -17,6 +17,7 @@ from sqlalchemy.exc import IntegrityError
 from app.api.deps import (
     ClientFactoryDep,
     DbSession,
+    EmbedderFactoryDep,
     OwnedPatient,
     OwnedReport,
     SessionFactoryDep,
@@ -24,6 +25,7 @@ from app.api.deps import (
 from app.config import get_settings
 from app.models import Report, ReportFile
 from app.schemas.report import ConfirmReport, DuplicateReport, ReportRead, ReportReview
+from app.services.embeddings import index_report_task
 from app.services.ingestion import (
     ConfirmError,
     ReportStateError,
@@ -175,8 +177,16 @@ def review_report(report: OwnedReport) -> ReportReview:
     "/reports/{report_id}/confirm",
     responses={status.HTTP_409_CONFLICT: {}, status.HTTP_422_UNPROCESSABLE_CONTENT: {}},
 )
-def confirm(body: ConfirmReport, report: OwnedReport, db: DbSession) -> ReportRead:
-    """Save the reviewed (and corrected) rows to the member's history."""
+def confirm(
+    body: ConfirmReport,
+    report: OwnedReport,
+    db: DbSession,
+    background: BackgroundTasks,
+    session_factory: SessionFactoryDep,
+    embedder_factory: EmbedderFactoryDep,
+) -> ReportRead:
+    """Save the reviewed (and corrected) rows to the member's history. The report's text is
+    then indexed for search in the background."""
     try:
         confirm_report(db, report, body, now=datetime.now(UTC))
     except ReportStateError as exc:
@@ -184,6 +194,12 @@ def confirm(body: ConfirmReport, report: OwnedReport, db: DbSession) -> ReportRe
     except ConfirmError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from None
     db.commit()
+    background.add_task(
+        index_report_task,
+        report.id,
+        session_factory=session_factory,
+        embedder_factory=embedder_factory,
+    )
     return ReportRead.model_validate(report)
 
 

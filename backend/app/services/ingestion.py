@@ -221,5 +221,6 @@ def confirm_report(
     session.add_all(metrics)
     report.collected_at = collected_at
     report.status = "confirmed"
-    # Phase 12: chunk the scrubbed text in raw_extraction and store embeddings here.
+    # The scrubbed text in raw_extraction is indexed for search after commit
+    # (app.services.embeddings.index_report_task).
     return metrics

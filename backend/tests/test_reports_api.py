@@ -18,13 +18,15 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_client_factory, get_session_factory
+from app.api.deps import get_client_factory, get_embedder_factory, get_session_factory
 from app.api.reports import get_max_upload_bytes
 from app.cli.seed import load_metric_seeds, seed_metric_dictionary
 from app.main import app
-from app.models import Family, Metric, Patient, Report, User
+from app.models import Family, Metric, Patient, Report, ReportChunk, User
+from app.services.embeddings import search_report_text
 from app.services.extraction.header import IST
 from tests import synthetic_pdf as fake
+from tests.embedding_helpers import BrokenEmbedder, FakeEmbedder
 from tests.factories import add, add_family, auth_headers, build_family, build_patient, build_user
 from tests.structuring_data import FakeChatClient
 from tests.synthetic_pdf import FIXTURE_PATH
@@ -237,6 +239,58 @@ def test_confirm_saves_the_reviewed_rows_to_history(
     assert (
         client.get(f"/reports/{report_id}/review", headers=auth_headers(alice)).status_code == 409
     )
+
+
+def test_confirming_indexes_the_report_text_for_search(
+    client: TestClient,
+    llm: FakeChatClient,
+    db_session: Session,
+    alice: User,
+    member: Patient,
+    embedder: FakeEmbedder,
+) -> None:
+    report_id = processed(client, alice, member)["id"]
+    review = client.get(f"/reports/{report_id}/review", headers=auth_headers(alice)).json()
+    client.post(
+        f"/reports/{report_id}/confirm", json=confirm_body(review), headers=auth_headers(alice)
+    )
+
+    chunks = db_session.scalars(
+        select(ReportChunk)
+        .where(ReportChunk.report_id == uuid.UUID(report_id))
+        .order_by(ReportChunk.chunk_index)
+    ).all()
+    assert [c.content for c in chunks] == embedder.passages
+    assert len(chunks) == 3
+    assert {c.patient_id for c in chunks} == {member.id}
+    # Only scrubbed text was embedded and stored.
+    for value in (fake.NAME, fake.REFERRED_BY, fake.PHONE, fake.EMAIL, fake.URINE_BARCODE):
+        assert all(value not in c.content for c in chunks)
+
+    # The saved text is now searchable. (Ranking quality is the real model's job; the fake
+    # bag-of-words model is only exact about which chunks can be found.)
+    hits = search_report_text(db_session, embedder, [member.id], "ferritin", k=3)
+    assert {h.report_id for h in hits} == {uuid.UUID(report_id)}
+    assert any("FERRITIN C.M.I.A 48.3 ng/mL" in h.content for h in hits)
+
+
+def test_saving_values_does_not_depend_on_the_search_index(
+    client: TestClient, llm: FakeChatClient, db_session: Session, alice: User, member: Patient
+) -> None:
+    app.dependency_overrides[get_embedder_factory] = lambda: BrokenEmbedder
+    report_id = processed(client, alice, member)["id"]
+    review = client.get(f"/reports/{report_id}/review", headers=auth_headers(alice)).json()
+
+    response = client.post(
+        f"/reports/{report_id}/confirm", json=confirm_body(review), headers=auth_headers(alice)
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "confirmed"
+    count = select(func.count()).where(Metric.report_id == uuid.UUID(report_id))
+    assert db_session.scalar(count) == 4
+    chunks = select(func.count()).where(ReportChunk.report_id == uuid.UUID(report_id))
+    assert db_session.scalar(chunks) == 0
 
 
 def test_corrections_are_recomputed_on_the_server(

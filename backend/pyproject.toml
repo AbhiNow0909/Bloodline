@@ -6,6 +6,7 @@ requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.20.0",
     "fastapi>=0.141.1",
+    "fastembed>=0.8.1",
     "groq>=1.7.0",
     "pdfplumber>=0.11.10",
     "pgvector>=0.5.0",
@@ -75,4 +76,5 @@ addopts = ["-ra", "--strict-markers", "--strict-config"]
 filterwarnings = ["error::DeprecationWarning"]
 markers = [
     "live: calls the real Groq API; skipped unless GROQ_API_KEY is set (deselect: -m 'not live')",
+    "model: runs the real embedding model; skipped unless it is already downloaded",
 ]

@@ -5,10 +5,12 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Engine, create_engine, make_url
 from sqlalchemy.orm import Session
 
+from app.api.deps import get_embedder_factory
 from app.config import get_settings
 from app.db import get_db
 from app.main import app
 from tests.db_helpers import run_alembic
+from tests.embedding_helpers import FakeEmbedder
 
 # Hosts where the suite may create and drop its test database (local Docker, CI service).
 LOCAL_DB_HOSTS = {"localhost", "127.0.0.1", "::1", "db"}
@@ -57,13 +59,20 @@ def db_session(engine: Engine) -> Iterator[Session]:
 
 
 @pytest.fixture
-def client(db_session: Session) -> Iterator[TestClient]:
+def embedder() -> FakeEmbedder:
+    """The embedding model the API uses in tests (never the real one, which CI lacks)."""
+    return FakeEmbedder()
+
+
+@pytest.fixture
+def client(db_session: Session, embedder: FakeEmbedder) -> Iterator[TestClient]:
     """API client whose requests use the test's rolled-back session."""
 
     def override_get_db() -> Iterator[Session]:
         yield db_session
 
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_embedder_factory] = lambda: lambda: embedder
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()

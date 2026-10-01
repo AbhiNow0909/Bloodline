@@ -28,6 +28,16 @@ class Settings(BaseSettings):
     structuring_model: str = "openai/gpt-oss-20b"
     agent_model: str = "openai/gpt-oss-120b"
 
+    # Local embeddings for searching report text (fastembed, ONNX; nothing leaves the server).
+    embedding_model: str = "BAAI/bge-small-en-v1.5"
+    # Where the model files live. The Docker image bakes them into /opt/models at build time.
+    # A factory, so the home directory is only looked up when no directory is configured.
+    embedding_cache_dir: Path = Field(default_factory=lambda: Path.home() / ".cache" / "fastembed")
+    # True in the image: never download at runtime (Render has no persistent disk).
+    embedding_offline: bool = False
+    # One thread keeps memory and CPU use predictable on a small instance.
+    embedding_threads: int = Field(default=1, ge=1, le=8)
+
     @field_validator("groq_api_key", mode="before")
     @classmethod
     def blank_key_is_unset(cls, value: object) -> object:

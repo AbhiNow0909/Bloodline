@@ -223,6 +223,25 @@ jobs:
           print('extracted results pages', pages)
           " < backend/tests/fixtures/synthetic_thyrocare_report.pdf
 
+      - name: Embedding model is baked in and works with no network
+        run: |
+          docker run --rm -i --network none \
+            --env DATABASE_URL=postgresql+psycopg://unused@localhost/unused \
+            --env JWT_SECRET="$JWT_SECRET" bloodline-api:ci python -c "
+          import sys
+          from app.services.embeddings import chunk_report, get_embedder
+          from app.services.extraction import extract_report
+          chunks = chunk_report(extract_report(sys.stdin.buffer.read()).pages)
+          embedder = get_embedder()
+          vectors = embedder.embed_passages(chunks)
+          query = embedder.embed_query('how was ferritin measured')
+          scores = [sum(a * b for a, b in zip(v, query)) for v in vectors]
+          assert [len(v) for v in vectors] == [384, 384, 384], [len(v) for v in vectors]
+          assert scores.index(max(scores)) == 2, scores  # the ferritin page
+          print('offline embeddings ok, scores', [round(s, 3) for s in scores])
+          " < backend/tests/fixtures/synthetic_thyrocare_report.pdf
+          docker exec api python -m app.cli.rag reindex  # runs against the CI database
+
       - name: API container logs
         if: always()
         run: docker logs api || true
