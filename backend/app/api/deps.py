@@ -16,7 +16,7 @@ from app.db import get_db, get_engine
 from app.models import Family, Patient, Report, User
 from app.security import decode_access_token
 from app.services.embeddings import Embedder, get_embedder
-from app.services.llm import ChatClient, get_structuring_client
+from app.services.llm import AgentClient, ChatClient, get_agent_client, get_structuring_client
 
 DbSession = Annotated[Session, Depends(get_db)]
 
@@ -115,6 +115,11 @@ def get_client_factory() -> Callable[[], ChatClient]:
     return get_structuring_client
 
 
+def get_agent_client_factory() -> Callable[[], AgentClient]:
+    """Resolved inside the chat route, so a missing GROQ_API_KEY becomes a clear 503."""
+    return get_agent_client
+
+
 def get_embedder_factory() -> Callable[[], Embedder]:
     """Resolved inside the indexing task: the model is loaded only when first needed."""
     return get_embedder
@@ -125,3 +130,4 @@ SessionFactoryDep = Annotated[
 ]
 ClientFactoryDep = Annotated[Callable[[], ChatClient], Depends(get_client_factory)]
 EmbedderFactoryDep = Annotated[Callable[[], Embedder], Depends(get_embedder_factory)]
+AgentClientFactoryDep = Annotated[Callable[[], AgentClient], Depends(get_agent_client_factory)]

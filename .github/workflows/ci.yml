@@ -211,6 +211,18 @@ jobs:
           code="$(upload)"
           if [ "$code" != "409" ]; then echo "::error::duplicate upload gave $code"; exit 1; fi
 
+          # Chat is wired, behind auth, and says clearly that CI has no Groq key.
+          code="$(curl --silent --output /tmp/chat.json --write-out '%{http_code}' -X POST \
+            "http://localhost:8000/patients/$member_id/chat" -H "$auth" \
+            -H 'Content-Type: application/json' \
+            -d '{"messages": [{"role": "user", "content": "Is anything out of range?"}]}')"
+          if [ "$code" != "503" ]; then echo "::error::chat gave $code"; cat /tmp/chat.json; exit 1; fi
+          jq -e '.detail | contains("GROQ_API_KEY")' /tmp/chat.json > /dev/null
+          code="$(curl --silent --output /dev/null --write-out '%{http_code}' -X POST \
+            "http://localhost:8000/families/$family_id/chat" -H 'Content-Type: application/json' \
+            -d '{"messages": [{"role": "user", "content": "Hi"}]}')"
+          if [ "$code" != "401" ]; then echo "::error::family chat without a token gave $code"; exit 1; fi
+
       - name: Extract the synthetic report inside the image
         run: |
           docker exec -i api python -c "

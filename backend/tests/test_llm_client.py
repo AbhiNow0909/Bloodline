@@ -10,10 +10,13 @@ import pytest
 
 from app.config import Settings
 from app.services.llm import (
+    AgentTurn,
     GroqChatClient,
     LLMNotConfiguredError,
     LLMRequestError,
     LLMUnavailableError,
+    ToolCall,
+    get_agent_client,
     get_structuring_client,
 )
 from app.services.llm import client as client_module
@@ -190,3 +193,105 @@ def test_structuring_needs_an_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.groq_api_key is None  # blank means "not configured"
     with pytest.raises(LLMNotConfiguredError, match="GROQ_API_KEY"):
         get_structuring_client()
+
+
+# --- tool calling (the query agent) ---------------------------------------------------------
+
+
+class FakeToolCreate:
+    """`chat.completions.create` returning tool calls or text, or raising."""
+
+    def __init__(self, *outcomes: Exception | SimpleNamespace) -> None:
+        self.outcomes = list(outcomes)
+        self.calls: list[dict[str, Any]] = []
+
+    def __call__(self, **kwargs: Any) -> SimpleNamespace:
+        self.calls.append(kwargs)
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return SimpleNamespace(choices=[SimpleNamespace(message=outcome)])
+
+
+def tool_message(content: str | None, *calls: tuple[str, str, str]) -> SimpleNamespace:
+    return SimpleNamespace(
+        content=content,
+        tool_calls=[
+            SimpleNamespace(id=i, function=SimpleNamespace(name=n, arguments=a))
+            for i, n, a in calls
+        ]
+        or None,
+    )
+
+
+TOOLS = [{"type": "function", "function": {"name": "f", "parameters": {"type": "object"}}}]
+
+
+def test_tool_calls_are_requested_and_parsed(
+    monkeypatch: pytest.MonkeyPatch, sleeps: list[float]
+) -> None:
+    fake = FakeToolCreate(tool_message(None, ("call_1", "f", '{"x": 1}')))
+    client = GroqChatClient(FAKE_KEY, sleep=sleeps.append)
+    monkeypatch.setattr(client._client.chat.completions, "create", fake)
+    messages = [{"role": "user", "content": "hi"}]
+
+    turn = client.complete_with_tools(model="m", messages=messages, tools=TOOLS, force_answer=False)
+
+    assert turn == AgentTurn("", (ToolCall("call_1", "f", '{"x": 1}'),))
+    sent = fake.calls[0]
+    assert sent["messages"] == messages
+    assert sent["tools"] == TOOLS
+    assert sent["tool_choice"] == "auto"
+    assert sent["include_reasoning"] is False  # gpt-oss reasoning stays out of the response
+    assert sent["reasoning_effort"] == "low"
+    assert (sent["temperature"], sent["seed"]) == (0, 0)
+
+
+def test_forcing_an_answer_turns_tools_off(
+    monkeypatch: pytest.MonkeyPatch, sleeps: list[float]
+) -> None:
+    fake = FakeToolCreate(tool_message("Done."))
+    client = GroqChatClient(FAKE_KEY, sleep=sleeps.append)
+    monkeypatch.setattr(client._client.chat.completions, "create", fake)
+
+    turn = client.complete_with_tools(model="m", messages=[], tools=TOOLS, force_answer=True)
+
+    assert turn == AgentTurn("Done.")
+    assert fake.calls[0]["tool_choice"] == "none"
+
+
+def test_tool_calling_shares_the_retry_policy_and_errors(
+    monkeypatch: pytest.MonkeyPatch, sleeps: list[float]
+) -> None:
+    fake = FakeToolCreate(
+        status_error(groq.RateLimitError, 429), tool_message("ok"),
+        *(status_error(groq.RateLimitError, 429) for _ in range(4)),
+        status_error(groq.AuthenticationError, 401),
+    )  # fmt: skip
+    client = GroqChatClient(FAKE_KEY, sleep=sleeps.append)
+    monkeypatch.setattr(client._client.chat.completions, "create", fake)
+
+    def ask() -> AgentTurn:
+        return client.complete_with_tools(model="m", messages=[], tools=TOOLS, force_answer=False)
+
+    assert ask().content == "ok"
+    with pytest.raises(LLMUnavailableError, match="busy"):
+        ask()
+    with pytest.raises(LLMRequestError, match="status 401"):
+        ask()
+
+
+def test_the_agent_needs_an_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    values: dict[str, Any] = {
+        "database_url": "postgresql+psycopg://u:p@localhost/db",
+        "jwt_secret": "s" * 32,
+        "groq_api_key": "",
+    }
+    settings = Settings(_env_file=None, **values)
+    get_agent_client.cache_clear()
+    monkeypatch.setattr(client_module, "get_settings", lambda: settings)
+    try:
+        with pytest.raises(LLMNotConfiguredError, match="assistant is not available"):
+            get_agent_client()
+    finally:
+        get_agent_client.cache_clear()

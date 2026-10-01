@@ -289,6 +289,43 @@ uv run python -m app.cli.rag search --member <member id> "how was ferritin measu
 - **Postgres**: needs pgvector 0.8 or newer (iterative index scans keep filtered searches from
   returning too few results). The local image has 0.8.6; Neon offers 0.8.
 
+### Asking questions (query agent)
+
+| Endpoint | What it does |
+|---|---|
+| `POST /patients/{id}/chat` | ask about one family member |
+| `POST /families/{id}/chat` | ask across a family ("who has high LDL?") |
+
+The app sends the conversation so far; the server keeps no chat history:
+
+```bash
+curl -s -X POST http://localhost:8000/families/<family id>/chat \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"messages": [{"role": "user", "content": "Is anyone outside the normal range?"}]}'
+# {"reply": "...", "sources": [{"report_id", "collected_at", "lab_name", "member_id",
+#   "member_name"}], "disclaimer": "Not medical advice. ..."}
+```
+
+- `openai/gpt-oss-120b` (Groq, `AGENT_MODEL`) answers by calling typed tools: list tests
+  and reports, a test's history, latest values, out-of-range values, compare two reports, a
+  trend summary (computed in Python: change, percent, slope, direction, range crossings) and
+  report-text search. Every tool reads only that member, or that family's members. At most 5
+  rounds of tool calls per question.
+- **Names never reach the model.** A member is "the patient"; in a family each member is
+  "Member A", "Member B", ... (in the order they were added), with sex and age. Names the user
+  types are replaced by these labels, labels in the reply are turned back into names on the
+  server, and a request that would still contain a member's name is not sent (503).
+- **Flag and explain, never diagnose.** The model may say a value is outside the lab's range,
+  describe what a test generally measures and how values changed, and suggest seeing a doctor;
+  it must not diagnose or suggest medicines, supplements, doses, diets or treatments. Every
+  reply carries a fixed disclaimer, and `sources` lists the reports the answer drew on.
+- Errors: no `GROQ_API_KEY` or the AI service busy → 503 with a message to show; the service
+  rejecting the request → 502.
+- **Free tier**: Groq allows `gpt-oss-120b` about 8,000 tokens per minute, and one tool round
+  sends about 1,300 tokens plus tool results. Several questions in one minute make the next
+  one wait for the limit (we retry with backoff, up to about 20 s per wait); most answers take
+  1–3 s.
+
 ### Frontend
 
 Start the backend first (above) and create a user with the CLI; there is no sign-up page.
@@ -347,9 +384,10 @@ uv run mypy
 uv run pytest
 ```
 
-One test (`tests/test_structuring_live.py`, marked `live`) calls the real Groq API with the
-synthetic report. It runs when `GROQ_API_KEY` is set and is skipped otherwise (as in CI);
-leave it out locally with `uv run pytest -m "not live"`.
+Tests marked `live` (`tests/test_structuring_live.py`, `tests/test_agent_live.py`) call the
+real Groq API with synthetic data only (the agent test also checks that no name was sent).
+They run when `GROQ_API_KEY` is set and are skipped otherwise (as in CI); leave them out
+locally with `uv run pytest -m "not live"`.
 
 Tests marked `model` (`tests/test_embedder_model.py`) run the real embedding model when it is
 already downloaded (it is after the first `reindex`/`search`, or after any run outside
@@ -384,7 +422,9 @@ pull request, and on demand:
   as root, then migrates and seeds the empty database from inside the image (twice for the
   seed, to prove it is idempotent), creates a user with the CLI, logs in, creates a family
   and a member through the API, uploads the synthetic report (which must fail cleanly for
-  lack of a Groq key in CI, then be refused as a duplicate), and extracts it inside the image.
+  lack of a Groq key in CI, then be refused as a duplicate), checks that chat answers 503
+  ("GROQ_API_KEY is not set") with a token and 401 without one, and extracts the report inside
+  the image.
   Finally it embeds the synthetic report with the model baked into the image, with networking
   turned off, checks that a ferritin question finds the ferritin page, and runs the reindex
   CLI against the CI database.
