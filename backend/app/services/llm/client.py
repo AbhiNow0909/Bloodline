@@ -70,6 +70,20 @@ def _is_retryable(exc: Exception) -> bool:
     return isinstance(exc, groq.RateLimitError | groq.InternalServerError | groq.APIConnectionError)
 
 
+def _rejected_generation(exc: LLMRequestError) -> str | None:
+    """The model's reply when Groq rejected it only for not matching the JSON schema
+    (`json_validate_failed`, e.g. a nullable field left out). Our callers validate every reply
+    with their own models, which decide; any other rejection gives None."""
+    cause = exc.__cause__
+    if not isinstance(cause, groq.BadRequestError) or not isinstance(cause.body, dict):
+        return None
+    error = cause.body.get("error", cause.body)
+    if not isinstance(error, dict) or error.get("code") != "json_validate_failed":
+        return None
+    generation = error.get("failed_generation")
+    return generation if isinstance(generation, str) and generation else None
+
+
 def _retry_after(exc: Exception) -> float | None:
     if isinstance(exc, groq.APIStatusError):
         try:
@@ -88,11 +102,13 @@ class GroqChatClient:
         *,
         timeout: float = 60.0,
         attempts: int = 4,
+        max_delay: float = 20.0,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         # SDK retries are off so `call_with_retries` is the single, tested policy.
         self._client = groq.Groq(api_key=api_key, max_retries=0, timeout=timeout)
         self._attempts = attempts
+        self._max_delay = max_delay
         self._sleep = sleep
 
     def _send[T](self, call: Callable[[], T]) -> T:
@@ -103,6 +119,7 @@ class GroqChatClient:
                 is_retryable=_is_retryable,
                 retry_after=_retry_after,
                 attempts=self._attempts,
+                max_delay=self._max_delay,
                 sleep=self._sleep,
             )
         except (groq.RateLimitError, groq.InternalServerError, groq.APIConnectionError) as exc:
@@ -110,6 +127,10 @@ class GroqChatClient:
                 "The AI service is busy or unreachable. Please try again in a minute."
             ) from exc
         except groq.APIStatusError as exc:
+            if exc.status_code == 413:
+                raise LLMRequestError(
+                    "The text was too large for the AI service's free tier (status 413)."
+                ) from exc
             raise LLMRequestError(
                 f"The AI service rejected the request (status {exc.status_code})."
             ) from exc
@@ -138,7 +159,13 @@ class GroqChatClient:
             )
             return response.choices[0].message.content or ""
 
-        content = self._send(call)
+        try:
+            content = self._send(call)
+        except LLMRequestError as exc:
+            rejected = _rejected_generation(exc)
+            if rejected is None:
+                raise
+            content = rejected
         try:
             json.loads(content)
         except ValueError as exc:
@@ -193,8 +220,19 @@ def get_agent_client() -> AgentClient:
 
 @lru_cache
 def get_structuring_client() -> ChatClient:
-    """One shared client (and HTTP connection pool) for the process."""
+    """Reads reports in the background, so it can wait: a large report is sent in parts, and
+    later parts wait for the free tier's per-minute token window (Groq's Retry-After, up to a
+    minute each time). One shared client (and HTTP connection pool) for the process."""
     key = get_settings().groq_api_key
     if key is None:
         raise LLMNotConfiguredError("GROQ_API_KEY is not set, so reports cannot be structured.")
+    return GroqChatClient(key.get_secret_value(), attempts=6, max_delay=60.0)
+
+
+@lru_cache
+def get_explanation_client() -> ChatClient:
+    """Explains findings while someone waits on the page: the usual, shorter retries."""
+    key = get_settings().groq_api_key
+    if key is None:
+        raise LLMNotConfiguredError("GROQ_API_KEY is not set, so explanations are not available.")
     return GroqChatClient(key.get_secret_value())

@@ -17,6 +17,7 @@ from app.services.llm import (
     LLMUnavailableError,
     ToolCall,
     get_agent_client,
+    get_explanation_client,
     get_structuring_client,
 )
 from app.services.llm import client as client_module
@@ -295,3 +296,91 @@ def test_the_agent_needs_an_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
             get_agent_client()
     finally:
         get_agent_client.cache_clear()
+
+
+# --- large reports ----------------------------------------------------------------------------
+
+
+def test_a_too_large_request_is_explained_and_not_retried(
+    monkeypatch: pytest.MonkeyPatch, sleeps: list[float]
+) -> None:
+    fake = FakeCreate(status_error(groq.APIStatusError, 413))
+
+    with pytest.raises(LLMRequestError, match="too large for the AI service's free tier"):
+        complete(make_client(monkeypatch, fake, sleeps))
+    assert len(fake.calls) == 1
+
+
+def test_a_patient_client_waits_as_long_as_retry_after_asks(
+    monkeypatch: pytest.MonkeyPatch, sleeps: list[float]
+) -> None:
+    def busy() -> FakeCreate:
+        return FakeCreate(
+            *(status_error(groq.RateLimitError, 429, {"retry-after": "45"}) for _ in range(5)), "{}"
+        )
+
+    patient = GroqChatClient(FAKE_KEY, attempts=6, max_delay=60.0, sleep=sleeps.append)
+    monkeypatch.setattr(patient._client.chat.completions, "create", busy())
+    complete(patient)
+    assert sleeps == [45.0] * 5
+
+    sleeps.clear()
+    with pytest.raises(LLMUnavailableError):
+        complete(make_client(monkeypatch, busy(), sleeps))  # the usual client gives up sooner
+    assert sleeps == [20.0] * 3
+
+
+def test_reports_are_read_patiently_and_explanations_quickly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    values: dict[str, Any] = {
+        "database_url": "postgresql+psycopg://u:p@localhost/db",
+        "jwt_secret": "s" * 32,
+        "groq_api_key": FAKE_KEY,
+    }
+    monkeypatch.setattr(client_module, "get_settings", lambda: Settings(_env_file=None, **values))
+    get_structuring_client.cache_clear()
+    get_explanation_client.cache_clear()
+    try:
+        structuring: Any = get_structuring_client()
+        explanation: Any = get_explanation_client()
+        assert (structuring._attempts, structuring._max_delay) == (6, 60.0)
+        assert (explanation._attempts, explanation._max_delay) == (4, 20.0)
+    finally:
+        get_structuring_client.cache_clear()
+        get_explanation_client.cache_clear()
+
+
+def rejected(code: str, generation: str | None) -> groq.BadRequestError:
+    """Groq's 400 for a reply it judged not to match the JSON schema."""
+    error: dict[str, Any] = {"message": "Generated JSON does not match", "code": code}
+    if generation is not None:
+        error["failed_generation"] = generation
+    return groq.BadRequestError(
+        "error", response=httpx.Response(400, request=REQUEST), body={"error": error}
+    )
+
+
+def test_a_reply_groq_rejected_for_the_schema_is_handed_back_for_our_own_checks(
+    monkeypatch: pytest.MonkeyPatch, sleeps: list[float]
+) -> None:
+    reply = '{"tests": [{"raw_name": "FERRITIN", "value": "48.3"}]}'  # "panel" left out
+    fake = FakeCreate(rejected("json_validate_failed", reply))
+
+    assert complete(make_client(monkeypatch, fake, sleeps)) == reply
+    assert len(fake.calls) == 1  # no retry, no extra tokens
+
+
+@pytest.mark.parametrize(
+    ("error", "message"),
+    [
+        (rejected("invalid_request_error", '{"tests": []}'), "status 400"),
+        (rejected("json_validate_failed", None), "status 400"),
+        (rejected("json_validate_failed", "{not json"), "not JSON"),
+    ],
+)
+def test_other_rejections_are_still_errors(
+    monkeypatch: pytest.MonkeyPatch, sleeps: list[float], error: Exception, message: str
+) -> None:
+    with pytest.raises(LLMRequestError, match=message):
+        complete(make_client(monkeypatch, FakeCreate(error), sleeps))

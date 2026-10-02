@@ -64,8 +64,10 @@ class ExtractedReport(BaseModel):
     # A stored report read back therefore has an empty identity (the default).
     identity: PrintedIdentity = Field(default_factory=PrintedIdentity, exclude=True, repr=False)
 
+    def page_llm_texts(self) -> list[str]:
+        """Each page's scrubbed results, labelled with its sample type."""
+        return [f"Sample type: {page.sample_type or 'unknown'}\n{page.text}" for page in self.pages]
+
     def llm_text(self) -> str:
         """The scrubbed results of every page, each labelled with its sample type."""
-        return "\n\n".join(
-            f"Sample type: {page.sample_type or 'unknown'}\n{page.text}" for page in self.pages
-        )
+        return "\n\n".join(self.page_llm_texts())

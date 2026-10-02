@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.services.agent import ChatScope
 from app.services.insights import explain_insights, member_insights
-from app.services.llm import get_structuring_client
+from app.services.llm import get_explanation_client
 from tests.agent_helpers import rao_family, reading, report_on
 
 pytestmark = [
@@ -25,7 +25,7 @@ class Recording:
     """The real client, recording what was sent."""
 
     def __init__(self) -> None:
-        self.real = get_structuring_client()
+        self.real = get_explanation_client()
         self.sent: list[dict[str, Any]] = []
 
     def complete_json(self, **kwargs: Any) -> str:

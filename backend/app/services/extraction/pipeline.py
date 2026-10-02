@@ -7,6 +7,7 @@ from app.services.extraction.pdf_text import read_page_texts
 from app.services.extraction.pii import find_leaks, scrub_text
 from app.services.extraction.schemas import (
     ExtractedReport,
+    NoTextLayerError,
     PiiLeakError,
     PrintedIdentity,
     ResultsPage,
@@ -27,11 +28,30 @@ def _single[T](values: list[T | None], what: str, warnings: list[str]) -> T | No
     return distinct[0] if distinct else None
 
 
+def _skipped_pictures_warning(numbers: list[int]) -> str:
+    """Shown in review: "Page 26 has no text (a picture) and was skipped: …"."""
+    if len(numbers) == 1:
+        return (
+            f"Page {numbers[0]} has no text (a picture) and was skipped: check the PDF to make "
+            "sure no results are on it."
+        )
+    pages = f"{', '.join(map(str, numbers[:-1]))} and {numbers[-1]}"
+    return (
+        f"Pages {pages} have no text (pictures) and were skipped: check the PDF to make sure no "
+        "results are on them."
+    )
+
+
 def extract_report(pdf_bytes: bytes) -> ExtractedReport:
     """Raises `ExtractionError` subclasses with user-safe messages."""
     texts = read_page_texts(pdf_bytes)
     kinds = [classify_page(text) for text in texts]
     results = [i for i, kind in enumerate(kinds) if kind is PageKind.RESULTS]
+    # Pages without text (pictures, or scans). Only ones after the last results page, such
+    # as a back cover, may be skipped; anywhere else a scanned page could hide results.
+    pictures = [i for i, text in enumerate(texts) if not text.strip()]
+    if pictures and (not results or pictures[0] < results[-1]):
+        raise NoTextLayerError("scanned/image PDF not supported yet")
     if not results:
         raise UnsupportedLayoutError(
             "No results pages found. Only Thyrocare-style reports are supported so far."
@@ -46,6 +66,8 @@ def extract_report(pdf_bytes: bytes) -> ExtractedReport:
     )
 
     warnings = [w for h in headers.values() for w in h.warnings]
+    if pictures:
+        warnings.append(_skipped_pictures_warning([i + 1 for i in pictures]))
     if len(identity.names) > 1:
         warnings.append("Results pages show different patient names")
     age = _single([h.age_years for h in headers.values()], "patient ages", warnings)

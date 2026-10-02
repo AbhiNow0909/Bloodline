@@ -37,13 +37,13 @@ function Processing() {
         Reading the report
       </p>
       <p>
-        Bloodline is finding the test results in the PDF. This usually takes a few seconds; this
-        page updates by itself.
+        Bloodline is finding the test results in the PDF. This usually takes a few seconds, and a
+        few minutes for a long health checkup, which is read in parts. This page updates by itself.
       </p>
       {slow && (
         <p className="font-semibold">
-          This is taking longer than usual. If nothing changes in a few minutes, delete the report
-          and upload it again.
+          Still reading. A long report can take a few minutes when the free AI service is busy. If
+          nothing changes in 15 minutes, delete the report and upload it again.
         </p>
       )}
     </div>

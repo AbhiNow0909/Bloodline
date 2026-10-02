@@ -232,7 +232,7 @@ curl -s -X POST http://localhost:8000/patients/<member id>/reports \
 # 202 {"id": "<report id>", "status": "processing", ...}
 
 curl -s http://localhost:8000/reports/<report id> -H "Authorization: Bearer $TOKEN"
-# poll until "status" is "pending_review" (usually a few seconds) or "failed"
+# poll until "status" is "pending_review" (seconds; a few minutes for a long checkup) or "failed"
 ```
 
 | Endpoint | What it does |
@@ -249,6 +249,21 @@ curl -s http://localhost:8000/reports/<report id> -H "Authorization: Bearer $TOK
 Processing needs `GROQ_API_KEY`; without it, uploads end as `failed` with that reason. On
 confirm, every number (value, canonical unit, flag) is recomputed on the server from the
 reviewed text and range.
+
+- **Pages without text** (pictures): one after the last results page, such as a back cover,
+  is skipped, and the review says so ("Page 26 has no text (a picture) and was skipped…").
+  Anywhere else, or in a report with no text at all, the report fails ("scanned/image PDF
+  not supported yet"), because a scanned page could hide results.
+- **Long reports** (health checkups of 20+ pages) are sent to the AI in parts of whole pages
+  (at most `MAX_PART_CHARS`, 6,000 characters), because Groq's free tier allows
+  `gpt-oss-20b` 8,000 tokens a minute and a whole checkup is larger than that. Later parts
+  wait for the per-minute window (Groq's Retry-After, up to a minute, 6 attempts), so such a
+  report takes a few minutes; the rows are merged in page order and every value is still
+  checked against the text of its own part.
+- Groq's strict JSON mode sometimes rejects a reply only because the model left out a field
+  it would have set to null (`json_validate_failed`). That reply is taken from Groq's error
+  and checked by our own models instead, where a missing optional field counts as null and
+  anything else wrong still fails.
 
 ### History and trends
 

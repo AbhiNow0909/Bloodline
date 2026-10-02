@@ -11,6 +11,7 @@ from app.services.llm.client import (
     LLMUnavailableError,
     ToolCall,
     get_agent_client,
+    get_explanation_client,
     get_structuring_client,
 )
 
@@ -25,5 +26,6 @@ __all__ = [
     "LLMUnavailableError",
     "ToolCall",
     "get_agent_client",
+    "get_explanation_client",
     "get_structuring_client",
 ]

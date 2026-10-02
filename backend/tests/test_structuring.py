@@ -1,5 +1,6 @@
 """Structuring with the LLM replaced at the `ChatClient` boundary."""
 
+import copy
 import json
 from decimal import Decimal
 from typing import Any
@@ -13,6 +14,7 @@ from app.services.structuring import (
     StructuredReport,
     StructuringError,
     normalize_test,
+    service,
     structure_report,
 )
 from app.services.structuring.prompt import SYSTEM_PROMPT
@@ -236,3 +238,113 @@ def test_a_name_missing_from_the_text_is_flagged() -> None:
     row = normalize_test(_test(), sex="female", metric_index=INDEX, source_text="1.2 ng/mL")
 
     assert NAME_NOT_IN_SOURCE in row.warnings
+
+
+# --- large reports: sent in parts of whole pages ----------------------------------------------
+
+
+class PartwiseClient:
+    """Replies to each part with the synthetic tests whose values are printed in that part,
+    as the model would; `bad_part` (1-based) gets a reply in the wrong shape."""
+
+    def __init__(self, bad_part: int | None = None) -> None:
+        self.calls: list[dict[str, Any]] = []
+        self.bad_part = bad_part
+
+    def complete_json(self, **kwargs: Any) -> str:
+        self.calls.append(kwargs)
+        if len(self.calls) == self.bad_part:
+            return json.dumps({"rows": []})
+        tests = [t for t in SYNTHETIC_LLM_REPLY["tests"] if t["value"] in kwargs["user"]]
+        return json.dumps({"tests": tests})
+
+
+PAGES = REPORT.page_llm_texts()  # creatinine; microalbumin + ratio; ferritin
+
+
+def test_a_small_report_is_one_part() -> None:
+    assert service.report_parts(REPORT) == [REPORT.llm_text()]
+
+
+def test_parts_are_whole_pages_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(service, "MAX_PART_CHARS", len(PAGES[0]) + 2 + len(PAGES[1]))
+    assert service.report_parts(REPORT) == [f"{PAGES[0]}\n\n{PAGES[1]}", PAGES[2]]
+
+    # A page longer than the limit is still sent whole, on its own.
+    monkeypatch.setattr(service, "MAX_PART_CHARS", 10)
+    assert service.report_parts(REPORT) == PAGES
+
+
+def test_a_large_report_is_structured_part_by_part(monkeypatch: pytest.MonkeyPatch) -> None:
+    whole, _ = structure()  # the same report in a single request
+    monkeypatch.setattr(service, "MAX_PART_CHARS", 10)
+    client = PartwiseClient()
+
+    result = structure_report(
+        REPORT, patient_sex="female", metric_index=INDEX, client=client, model="test-model"
+    )
+
+    # One request per part, each with only that part's text; the rows come back merged, in
+    # page order, exactly as from a single request.
+    assert [call["user"] for call in client.calls] == PAGES
+    assert result == whole
+    assert all(not metric.warnings for metric in result.metrics)
+
+
+def test_each_value_is_checked_against_its_own_part(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(service, "MAX_PART_CHARS", 10)
+
+    # A model answering every part with all four tests: rows not printed in that part are
+    # flagged (1 + 2 + 1 printed of 4 + 4 + 4 returned).
+    result, client = structure()
+
+    assert len(client.calls) == 3
+    flagged = [m for m in result.metrics if VALUE_NOT_IN_SOURCE in m.warnings]
+    assert len(result.metrics) - len(flagged) == 4
+
+
+def test_identity_in_any_part_stops_before_anything_is_sent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(service, "MAX_PART_CHARS", 10)
+    last = REPORT.pages[-1]
+    leaky_page = last.model_copy(update={"text": last.text + f"\n{fake.NAME}"})
+    leaky = REPORT.model_copy(update={"pages": (*REPORT.pages[:-1], leaky_page)})
+    client = PartwiseClient()
+
+    with pytest.raises(PiiLeakError):
+        structure_report(leaky, patient_sex="female", metric_index=INDEX, client=client, model="m")
+    assert client.calls == []  # not even the clean first parts
+
+
+def test_one_failing_part_fails_the_report(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(service, "MAX_PART_CHARS", 10)
+
+    with pytest.raises(StructuringError, match="unexpected shape"):
+        structure_report(
+            REPORT,
+            patient_sex="female",
+            metric_index=INDEX,
+            client=PartwiseClient(bad_part=2),
+            model="m",
+        )
+
+
+def test_a_field_left_out_by_the_model_counts_as_null() -> None:
+    reply = copy.deepcopy(SYNTHETIC_LLM_REPLY)
+    for test in reply["tests"]:
+        del test["panel"]  # as gpt-oss-20b sometimes does on parts without headings
+
+    result, _ = structure(reply)
+
+    whole, _ = structure()
+    assert [m.panel for m in result.metrics] == [None] * len(whole.metrics)
+    assert [m.value_text for m in result.metrics] == [m.value_text for m in whole.metrics]
+
+
+def test_a_required_field_left_out_is_still_rejected() -> None:
+    reply = copy.deepcopy(SYNTHETIC_LLM_REPLY)
+    del reply["tests"][0]["value"]
+
+    with pytest.raises(StructuringError, match="unexpected shape"):
+        structure(reply)

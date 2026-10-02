@@ -11,8 +11,9 @@ MAX_PAGES = 50  # lab reports are a handful of pages; anything larger is not a r
 
 
 def read_page_texts(pdf_bytes: bytes) -> list[str]:
-    """Return each page's text. Fails if the file is not a readable PDF, or if any page has no
-    text layer: a scanned page could hide results, so it is never silently skipped."""
+    """Return each page's text ("" for a page without a text layer, such as a picture). Fails
+    if the file is not a readable PDF, or if no page has text at all (a scanned report).
+    Whether a page without text may be skipped is decided by the caller (`extract_report`)."""
     try:
         with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
             if len(pdf.pages) > MAX_PAGES:
@@ -23,6 +24,6 @@ def read_page_texts(pdf_bytes: bytes) -> list[str]:
 
     if not texts:
         raise UnreadablePdfError("PDF has no pages")
-    if any(not text.strip() for text in texts):
+    if all(not text.strip() for text in texts):
         raise NoTextLayerError("scanned/image PDF not supported yet")
     return texts

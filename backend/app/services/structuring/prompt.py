@@ -28,4 +28,5 @@ Rules:
 - Do not create entries for headings, "Tests Done" lines, notes such as "Please correlate with
   clinical conditions", or placeholders.
 - If something is not printed, use null. Never invent a value.
+- Always write every field of every entry, even when its value is null.
 """

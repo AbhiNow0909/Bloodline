@@ -16,10 +16,14 @@ class StructuringError(Exception):
 # --- LLM output: every string copied from the report; no numbers are interpreted here ------
 
 
+# Optional fields default to None: the model sometimes leaves out a field it would set to
+# null (seen with `panel` on parts of a report without headings). Groq then rejects the reply,
+# and the client hands back that reply for these models to check instead (see
+# `GroqChatClient.complete_json`). Anything else wrong with it still fails validation here.
 class LlmRange(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    label: str | None
+    label: str | None = None
     text: str
 
 
@@ -27,13 +31,13 @@ class LlmTest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     raw_name: str
-    panel: str | None
-    technology: str | None
+    panel: str | None = None
+    technology: str | None = None
     value: str
-    unit: str | None
+    unit: str | None = None
     reference_ranges: list[LlmRange]
-    method: str | None
-    sample_type: str | None
+    method: str | None = None
+    sample_type: str | None = None
 
 
 class LlmReport(BaseModel):

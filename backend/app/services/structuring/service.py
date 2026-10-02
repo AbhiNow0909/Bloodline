@@ -100,19 +100,37 @@ def normalize_test(
     )
 
 
-def structure_report(
+# Groq's free tier allows 8,000 tokens a minute per model, counting the text sent (about 3.2
+# characters a token, plus ~750 tokens of instructions and schema) and the reply (about as
+# long as the text). A large health checkup does not fit in one request, so pages are sent in
+# parts of at most this many characters: roughly 4,000-5,000 tokens a part with its reply.
+# A page is never split, so a test's name, value, range and method stay together.
+MAX_PART_CHARS = 6_000
+
+
+def report_parts(report: ExtractedReport) -> list[str]:
+    """The text to send, in parts of whole pages, in page order."""
+    parts: list[list[str]] = []
+    size = 0
+    for page in report.page_llm_texts():
+        if parts and size + 2 + len(page) <= MAX_PART_CHARS:  # 2: the blank line between
+            parts[-1].append(page)
+            size += 2 + len(page)
+        else:
+            parts.append([page])
+            size = len(page)
+    return ["\n\n".join(pages) for pages in parts]
+
+
+def _structure_part(
+    text: str,
     report: ExtractedReport,
     *,
     patient_sex: Sex,
     metric_index: MetricIndex,
     client: ChatClient,
     model: str,
-) -> StructuredReport:
-    """Only `report.llm_text()` (scrubbed results) is ever sent to the LLM."""
-    text = report.llm_text()
-    if leaks := find_leaks(text, report.identity):  # second check, right at the LLM boundary
-        raise PiiLeakError(f"Identity data found in text meant for the AI ({', '.join(leaks)})")
-
+) -> list[StructuredMetric]:
     reply = client.complete_json(
         model=model,
         system=SYSTEM_PROMPT,
@@ -124,10 +142,38 @@ def structure_report(
         parsed = LlmReport.model_validate_json(reply)
     except ValidationError as exc:
         raise StructuringError("The AI returned the results in an unexpected shape.") from exc
-
-    metrics = tuple(
+    # Each value is checked against the part it came from.
+    return [
         normalize_test(test, sex=patient_sex, metric_index=metric_index, source_text=text)
         for test in parsed.tests
+    ]
+
+
+def structure_report(
+    report: ExtractedReport,
+    *,
+    patient_sex: Sex,
+    metric_index: MetricIndex,
+    client: ChatClient,
+    model: str,
+) -> StructuredReport:
+    """Only `report.llm_text()` (scrubbed results) is ever sent to the LLM, in parts of whole
+    pages when it is large (`MAX_PART_CHARS`). Any part failing fails the whole report."""
+    parts = report_parts(report)
+    for text in parts:  # second check, right at the LLM boundary, before anything is sent
+        if leaks := find_leaks(text, report.identity):
+            raise PiiLeakError(f"Identity data found in text meant for the AI ({', '.join(leaks)})")
+    metrics = tuple(
+        metric
+        for text in parts
+        for metric in _structure_part(
+            text,
+            report,
+            patient_sex=patient_sex,
+            metric_index=metric_index,
+            client=client,
+            model=model,
+        )
     )
     warnings = () if metrics else ("No test results were found in the report.",)
     return StructuredReport(model=model, metrics=metrics, warnings=warnings)

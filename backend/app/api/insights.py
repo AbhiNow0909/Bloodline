@@ -7,7 +7,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
 
-from app.api.deps import ClientFactoryDep, DbSession, OwnedPatient
+from app.api.deps import DbSession, ExplanationClientFactoryDep, OwnedPatient
 from app.config import get_settings
 from app.schemas.history import Insight
 from app.schemas.insights import InsightExplanations
@@ -34,7 +34,7 @@ def member_insights(patient: OwnedPatient, db: DbSession) -> list[Insight]:
 
 @router.post("/patients/{patient_id}/insights/explain", responses=_ERRORS)
 def explain_member_insights(
-    patient: OwnedPatient, db: DbSession, client_factory: ClientFactoryDep
+    patient: OwnedPatient, db: DbSession, client_factory: ExplanationClientFactoryDep
 ) -> InsightExplanations:
     """Plain-language explanations of the member's current findings (at most
     `MAX_EXPLAINED`). The model sees only facts about each test, never a name."""

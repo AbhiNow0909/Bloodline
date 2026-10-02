@@ -33,11 +33,16 @@ def test_rejects_files_that_are_not_readable_pdfs(data: bytes) -> None:
         read_page_texts(data)
 
 
-def test_a_page_without_text_fails_the_whole_report() -> None:
+def test_a_page_without_text_is_read_as_empty() -> None:
+    # Whether it may be skipped is decided by `extract_report` (only after the results).
     pdf = build_pdf([lines("TEST NAME TECHNOLOGY VALUE UNITS"), []])
 
+    assert read_page_texts(pdf) == ["TEST NAME TECHNOLOGY VALUE UNITS", ""]
+
+
+def test_a_pdf_without_any_text_is_a_scan() -> None:
     with pytest.raises(NoTextLayerError, match="scanned/image PDF not supported yet"):
-        read_page_texts(pdf)
+        read_page_texts(build_pdf([[], []]))
 
 
 def test_rejects_implausibly_long_pdfs() -> None:

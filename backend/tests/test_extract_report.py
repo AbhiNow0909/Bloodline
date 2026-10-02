@@ -6,6 +6,7 @@ import pytest
 
 from app.services.extraction import (
     ExtractedReport,
+    NoTextLayerError,
     PiiLeakError,
     UnsupportedLayoutError,
     extract_report,
@@ -113,6 +114,47 @@ def test_a_pdf_without_results_pages_is_unsupported() -> None:
 
     with pytest.raises(UnsupportedLayoutError, match="No results pages found"):
         extract_report(pdf)
+
+
+# --- pages without text (pictures) -----------------------------------------------------------
+
+PICTURE: list[fake.TextRun] = []  # a page with no text layer, like a full-page image
+RESULTS = [fake.creatinine_page(), fake.microalbumin_page(), fake.ferritin_page()]
+
+
+def test_a_picture_after_the_results_is_skipped_with_a_warning() -> None:
+    report = extract_report(build_pdf([fake.cover_page(), *RESULTS, PICTURE]))
+
+    assert [p.page_number for p in report.pages] == [2, 3, 4]
+    assert report.dropped_pages == (1, 5)
+    assert report.warnings == (
+        "Page 5 has no text (a picture) and was skipped: check the PDF to make sure no results "
+        "are on it.",
+    )
+
+
+def test_several_pictures_at_the_end_are_named_together() -> None:
+    report = extract_report(build_pdf([*RESULTS, fake.conditions_page(), PICTURE, PICTURE]))
+
+    assert report.warnings == (
+        "Pages 5 and 6 have no text (pictures) and were skipped: check the PDF to make sure no "
+        "results are on them.",
+    )
+
+
+@pytest.mark.parametrize(
+    "pages",
+    [
+        pytest.param([PICTURE, *RESULTS], id="before-the-results"),
+        pytest.param([RESULTS[0], PICTURE, *RESULTS[1:]], id="between-results-pages"),
+        pytest.param([fake.cover_page(), PICTURE], id="no-results-pages-at-all"),
+    ],
+)
+def test_a_picture_that_could_hide_results_fails_the_report(
+    pages: list[list[fake.TextRun]],
+) -> None:
+    with pytest.raises(NoTextLayerError, match="scanned/image PDF not supported yet"):
+        extract_report(build_pdf(pages))
 
 
 def test_fails_closed_if_scrubbing_misses_identity(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_client_factory
+from app.api.deps import get_explanation_client_factory
 from app.config import get_settings
 from app.main import app
 from app.models import Family, User
@@ -33,9 +33,9 @@ def model() -> Iterator[FakeChatClient]:
     fake = FakeChatClient(
         {"explanations": [{"id": "1", "text": "This result is below the lab's usual range."}]}
     )
-    app.dependency_overrides[get_client_factory] = lambda: lambda: fake
+    app.dependency_overrides[get_explanation_client_factory] = lambda: lambda: fake
     yield fake
-    app.dependency_overrides.pop(get_client_factory, None)
+    app.dependency_overrides.pop(get_explanation_client_factory, None)
 
 
 def test_a_members_insights(client: TestClient, family: dict[str, Any]) -> None:
@@ -148,14 +148,14 @@ def test_ai_failures_become_clear_errors(
             raise failure
         return FakeChatClient(failure)
 
-    app.dependency_overrides[get_client_factory] = lambda: factory
+    app.dependency_overrides[get_explanation_client_factory] = lambda: factory
     try:
         response = client.post(
             f"/patients/{family['amma'].id}/insights/explain",
             headers=auth_headers(family["owner"]),
         )
     finally:
-        app.dependency_overrides.pop(get_client_factory, None)
+        app.dependency_overrides.pop(get_explanation_client_factory, None)
 
     assert response.status_code == status
     assert response.json() == {"detail": detail}
