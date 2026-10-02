@@ -17,7 +17,7 @@ from app.schemas.history import (
     Reading,
     ReportSummary,
 )
-from app.services import history
+from app.services import history, insights
 
 router = APIRouter(tags=["history"])
 
@@ -79,5 +79,6 @@ def out_of_range(
 
 @router.get("/families/{family_id}/overview")
 def family_overview(family: OwnedFamily, db: DbSession) -> FamilyOverview:
-    """Every member's tests whose latest value is out of range, side by side."""
-    return history.family_overview(db, family)
+    """Every member's tests whose latest value is out of range, and their findings (see
+    `/patients/{id}/insights`), side by side."""
+    return insights.family_overview(db, family)

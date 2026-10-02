@@ -12,6 +12,8 @@ import type {
   ChatReply,
   ConfirmReportInput,
   Family,
+  Insight,
+  InsightResult,
   Member,
   MemberInput,
   MetricInfo,
@@ -64,6 +66,7 @@ export function fakeApi() {
   const calls: Call[] = []
   const overrides: ((call: Call) => Reply | undefined)[] = []
   const chatAnswers: string[] = []
+  const explainAnswers: string[] = []
   let nextId = 1
 
   const newId = (prefix: string) => `${prefix}-${String(nextId++)}`
@@ -229,6 +232,96 @@ export function fakeApi() {
     })
   }
 
+  /** What a member's results show, like the server works it out (`insights/rules.py`):
+   * outside the range, back within it, or a change of 25 % or more across the last 3. */
+  function insightsOf(memberId: string): Insight[] {
+    const series = new Map<string, Reading[]>()
+    for (const reading of readingsOf([memberId]).sort(byTime)) {
+      if (!reading.canonical_metric_id) continue
+      series.set(reading.canonical_metric_id, [
+        ...(series.get(reading.canonical_metric_id) ?? []),
+        reading,
+      ])
+    }
+    const result = (r: Reading): InsightResult => ({
+      report_id: r.report_id,
+      collected_at: r.collected_at,
+      value_text: r.value_text,
+      unit: r.unit,
+      value_canonical: r.value_canonical,
+      flag: r.flag,
+    })
+    const decimals = (v: string) => v.split('.')[1]?.length ?? 0
+    const found: { insight: Insight; rank: number }[] = []
+    for (const [metricId, points] of series) {
+      const metric = metricInfo(metricId)
+      const latest = points.at(-1)
+      if (!metric || !latest) continue
+      const previous = points.at(-2)
+      const make = (
+        kind: Insight['kind'],
+        compared: Reading | undefined,
+        resultsCompared: number,
+        inARow = 0,
+      ): Insight => {
+        let change: string | null = null
+        let percent: number | null = null
+        if (compared?.value_canonical && latest.value_canonical) {
+          const [a, b] = [Number(compared.value_canonical), Number(latest.value_canonical)]
+          change = (b - a).toFixed(
+            Math.max(decimals(compared.value_canonical), decimals(latest.value_canonical)),
+          )
+          percent = a === 0 ? null : Math.round(((b - a) / Math.abs(a)) * 1000) / 10
+        }
+        return {
+          patient_id: memberId,
+          kind,
+          metric,
+          latest: result(latest),
+          compared_with: compared ? result(compared) : null,
+          results_compared: resultsCompared,
+          change,
+          percent_change: percent,
+          outside_in_a_row: inARow,
+          reference_low: latest.reference_low,
+          reference_high: latest.reference_high,
+        }
+      }
+      if (latest.flag === 'low' || latest.flag === 'high') {
+        let inARow = 0
+        for (const point of [...points].reverse()) {
+          if (point.flag !== latest.flag) break
+          inARow++
+        }
+        const newly = previous !== undefined && previous.flag !== latest.flag
+        found.push({
+          insight: make('outside_range', previous, previous ? 2 : 1, inARow),
+          rank: newly ? 0 : 1,
+        })
+      } else if (latest.flag === 'normal' && previous) {
+        if (previous.flag === 'low' || previous.flag === 'high') {
+          found.push({ insight: make('back_in_range', previous, 2), rank: 3 })
+        } else {
+          const window = points.filter((p) => p.value_canonical !== null).slice(-3)
+          const first = window[0]
+          const change =
+            window.length > 1 && first ? make('big_change', first, window.length) : null
+          if (change?.percent_change != null && Math.abs(change.percent_change) >= 25) {
+            found.push({ insight: change, rank: 2 })
+          }
+        }
+      }
+    }
+    return found
+      .sort(
+        (a, b) =>
+          a.rank - b.rank ||
+          a.insight.metric.category.localeCompare(b.insight.metric.category) ||
+          a.insight.metric.canonical_name.localeCompare(b.insight.metric.canonical_name),
+      )
+      .map((f) => f.insight)
+  }
+
   function overview(familyId: string, name: string) {
     const list = [...members.values()]
       .filter((m) => m.family_id === familyId)
@@ -252,6 +345,7 @@ export function fakeApi() {
               name: nameOf(r),
               category: metricInfo(r.canonical_metric_id)?.category ?? null,
             })),
+          insights: insightsOf(patient.id),
         }
       }),
     }
@@ -358,6 +452,22 @@ export function fakeApi() {
         return json(409, { detail: 'Add a family member before asking about this family.' })
       }
       return chat(call, ids)
+    }
+
+    match = /^\/patients\/([^/]+)\/insights(\/explain)?$/.exec(path)
+    if (match?.[1]) {
+      const memberId = match[1]
+      if (!members.has(memberId)) return notFound('Patient')
+      const found = insightsOf(memberId)
+      if (!match[2]) return json(200, found)
+      return json(200, {
+        explanations: found.map((insight) => ({
+          metric_id: insight.metric.id,
+          kind: insight.kind,
+          text: explainAnswers.shift() ?? `${insight.metric.canonical_name}, explained simply.`,
+        })),
+        disclaimer: DISCLAIMER,
+      })
     }
 
     match = /^\/patients\/([^/]+)\/chat$/.exec(path)
@@ -472,8 +582,8 @@ export function fakeApi() {
       authorization: headers.get('Authorization'),
     }
     calls.push(call)
-    // A held chat question waits here until the test releases it.
-    if (chatGate && call.path.endsWith('/chat')) {
+    // A held AI request (chat or explanations) waits here until the test releases it.
+    if (chatGate && (call.path.endsWith('/chat') || call.path.endsWith('/explain'))) {
       const reply = chatGate.then(() => respond(call))
       lastChat = reply.then(() => undefined)
       return reply
@@ -587,8 +697,12 @@ export function fakeApi() {
     answerChat(...answers: string[]) {
       chatAnswers.push(...answers)
     },
-    /** Hold chat questions unanswered until the returned function is called. */
-    holdChat() {
+    /** The AI's next explanations, in order (otherwise "<test>, explained simply."). */
+    explainWith(...texts: string[]) {
+      explainAnswers.push(...texts)
+    },
+    /** Hold AI requests (chat and explanations) until the returned function is called. */
+    holdAi() {
       let release = () => {}
       chatGate = new Promise((resolve) => {
         release = () => {
@@ -598,7 +712,7 @@ export function fakeApi() {
       })
       return release
     },
-    /** Settles once the latest held chat question has been answered. */
+    /** Settles once the latest held AI request has been answered. */
     answered: () => lastChat,
     /** The messages each chat question sent, oldest first. */
     chatRequests: () =>

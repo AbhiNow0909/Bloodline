@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     # One thread keeps memory and CPU use predictable on a small instance.
     embedding_threads: int = Field(default=1, ge=1, le=8)
 
+    # Trend alerts (CLAUDE.md Section 4.4): a result still within its range is flagged when it
+    # moved by at least this percent across the last N results of the test.
+    trend_alert_percent: float = Field(default=25.0, gt=0, le=1000)
+    trend_alert_results: int = Field(default=3, ge=2, le=20)
+
     @field_validator("groq_api_key", mode="before")
     @classmethod
     def blank_key_is_unset(cls, value: object) -> object:

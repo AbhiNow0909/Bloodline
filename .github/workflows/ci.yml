@@ -223,6 +223,15 @@ jobs:
             -d '{"messages": [{"role": "user", "content": "Hi"}]}')"
           if [ "$code" != "401" ]; then echo "::error::family chat without a token gave $code"; exit 1; fi
 
+          # Insights are wired. Nothing is saved yet (no Groq key), so there are none, and
+          # explaining them returns at once without calling the AI.
+          curl --silent --fail "http://localhost:8000/patients/$member_id/insights" -H "$auth" \
+            | jq -e '. == []' > /dev/null
+          curl --silent --fail -X POST "http://localhost:8000/patients/$member_id/insights/explain" \
+            -H "$auth" | jq -e '.explanations == [] and (.disclaimer | length > 0)' > /dev/null
+          curl --silent --fail "http://localhost:8000/families/$family_id/overview" -H "$auth" \
+            | jq -e '.members[0].insights == []' > /dev/null
+
       - name: Extract the synthetic report inside the image
         run: |
           docker exec -i api python -c "

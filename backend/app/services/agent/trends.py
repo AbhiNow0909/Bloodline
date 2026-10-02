@@ -52,7 +52,8 @@ class TrendSummary:
     crossing: Crossing
 
 
-def _percent(old: Decimal, new: Decimal) -> float | None:
+def percent_change(old: Decimal, new: Decimal) -> float | None:
+    """Change from `old` to `new` in percent of `old`, to 0.1; None when `old` is zero."""
     return None if old == 0 else round(float((new - old) / abs(old)) * 100, 1)
 
 
@@ -100,9 +101,9 @@ def summarize(points: Sequence[HistoryPoint]) -> TrendSummary:
     direction: Direction = "not enough results"
     if first is not None and latest is not None and previous is not None:
         change_first = latest.value - first.value
-        percent_first = _percent(first.value, latest.value)
+        percent_first = percent_change(first.value, latest.value)
         change_previous = latest.value - previous.value
-        percent_previous = _percent(previous.value, latest.value)
+        percent_previous = percent_change(previous.value, latest.value)
         if percent_first is None:
             direction = (
                 "stable" if change_first == 0 else ("rising" if change_first > 0 else "falling")

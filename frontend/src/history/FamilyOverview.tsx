@@ -3,16 +3,16 @@ import { Link } from 'react-router'
 import { Icon } from '../components/Icon'
 import { MemberChip } from '../components/MemberChip'
 import { ErrorState, LoadingState } from '../components/States'
+import { InsightsPanel } from '../insights/InsightsPanel'
 import { formatDate, pluralize } from '../lib/format'
 import { useFamilyOverview } from '../lib/queries'
 import type { MemberOverview } from '../lib/types'
-import { rangeText } from '../lib/values'
-import { FlagLabel } from '../reports/FlagLabel'
 import { NotDiagnosis } from '../reports/NotDiagnosis'
-import { testPath } from './paths'
 
 function MemberPanel({ familyId, overview }: { familyId: string; overview: MemberOverview }) {
-  const { patient, out_of_range: flagged } = overview
+  const { patient, insights } = overview
+  // Tests not in the dictionary have no trends; still list them when outside the range.
+  const others = overview.out_of_range.filter((reading) => !reading.canonical_metric_id)
   const memberPath = `/families/${familyId}/members/${patient.id}`
   return (
     <section
@@ -35,43 +35,27 @@ function MemberPanel({ familyId, overview }: { familyId: string; overview: Membe
         </div>
       </div>
       {overview.latest_report_at &&
-        (flagged.length === 0 ? (
+        (insights.length + others.length === 0 ? (
           <p className="flex items-center gap-2 text-sm">
             <Icon name="check" className="size-4 text-edta" />
-            Every latest result is within the lab's range.
+            Every latest result is within the lab's range, with no big changes.
           </p>
         ) : (
-          <ul className="flex flex-col gap-2 border-t border-line pt-3">
-            {flagged.map((reading) => (
-              <li key={`${reading.name}-${reading.collected_at}`}>
-                <span className="flex flex-wrap items-baseline justify-between gap-x-3">
-                  <span className="font-semibold">
-                    {reading.canonical_metric_id ? (
-                      <Link
-                        to={testPath(familyId, patient.id, reading.canonical_metric_id)}
-                        className="text-edta underline underline-offset-4 hover:text-ink"
-                      >
-                        {reading.name}
-                      </Link>
-                    ) : (
-                      reading.name
-                    )}
-                  </span>
-                  <FlagLabel flag={reading.flag} />
-                </span>
-                <span className="block text-sm text-muted">
-                  {reading.value_text} {reading.unit} (range: {rangeText(reading)}),{' '}
-                  {formatDate(reading.collected_at)}
-                </span>
-              </li>
-            ))}
-          </ul>
+          <div className="border-t border-line">
+            <InsightsPanel
+              compact
+              familyId={familyId}
+              memberId={patient.id}
+              insights={insights}
+              others={others}
+            />
+          </div>
         ))}
     </section>
   )
 }
 
-/** Every member's latest out-of-range results, side by side. */
+/** What stands out in every member's results, side by side. */
 export function FamilyOverview({ familyId }: { familyId: string }) {
   const overview = useFamilyOverview(familyId)
 
@@ -83,11 +67,13 @@ export function FamilyOverview({ familyId }: { familyId: string }) {
     <section aria-labelledby="overview-heading" className="flex flex-col gap-4">
       <div>
         <h2 id="overview-heading" className="text-lg font-semibold">
-          Outside the lab's range, by member
+          What stands out, by member
         </h2>
-        <p className="text-muted">For each member, the tests whose latest result is Low or High.</p>
+        <p className="text-muted">
+          For each member: results outside the lab's range, back within it, or changing a lot.
+        </p>
       </div>
-      <div className="grid items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid items-start gap-4 md:grid-cols-2">
         {overview.data.members.map((member) => (
           <MemberPanel key={member.patient.id} familyId={familyId} overview={member} />
         ))}

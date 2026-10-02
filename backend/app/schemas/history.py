@@ -3,6 +3,7 @@
 import uuid
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -79,11 +80,48 @@ class ReportSummary(ReportRead):
     flagged_count: int  # readings flagged low or high
 
 
+# What a member's results show, computed in code (CLAUDE.md Section 4.4), most important first:
+# the latest result is outside the lab's range; it moved back into the range since the previous
+# result; or, still within the range, it changed a lot across the last few results.
+InsightKind = Literal["outside_range", "big_change", "back_in_range"]
+
+
+class InsightResult(BaseModel):
+    """One result an insight refers to."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    report_id: uuid.UUID
+    collected_at: datetime
+    value_text: str | None  # as printed
+    unit: str | None  # as printed
+    value_canonical: Decimal | None  # in the test's standard unit (`MetricInfo.canonical_unit`)
+    flag: MetricFlag
+
+
+class Insight(BaseModel):
+    patient_id: uuid.UUID
+    kind: InsightKind
+    metric: MetricInfo
+    latest: InsightResult
+    # The previous result; for `big_change`, the first of the results compared.
+    compared_with: InsightResult | None
+    results_compared: int  # results from `compared_with` to `latest`, both included
+    change: Decimal | None  # latest - compared_with, in the standard unit
+    percent_change: float | None
+    # For `outside_range`: how many of the latest results in a row are on the same side.
+    outside_in_a_row: int
+    # The latest result's range, in the standard unit.
+    reference_low: Decimal | None
+    reference_high: Decimal | None
+
+
 class MemberOverview(BaseModel):
     patient: PatientRead
     latest_report_at: datetime | None  # most recent confirmed collection time
     tracked_metric_count: int
     out_of_range: list[FlaggedReading]  # tests whose latest value is flagged
+    insights: list[Insight] = []
 
 
 class FamilyOverview(BaseModel):

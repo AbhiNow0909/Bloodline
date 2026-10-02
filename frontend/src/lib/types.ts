@@ -178,12 +178,55 @@ export interface MemberOverview {
   latest_report_at: string | null
   tracked_metric_count: number
   out_of_range: FlaggedReading[]
+  insights: Insight[]
 }
 
 export interface FamilyOverview {
   family_id: string
   name: string
   members: MemberOverview[]
+}
+
+// --- insights --------------------------------------------------------------------------------
+
+/** What a member's results show, computed on the server, most important first: the latest
+ * result is outside the lab's range; it is back within the range since the previous result;
+ * or, still within the range, it changed a lot across the last few results. */
+export type InsightKind = 'outside_range' | 'big_change' | 'back_in_range'
+
+export interface InsightResult {
+  report_id: string
+  collected_at: string
+  value_text: string | null // as printed
+  unit: string | null // as printed
+  value_canonical: string | null // in the test's standard unit
+  flag: MetricFlag
+}
+
+export interface Insight {
+  patient_id: string
+  kind: InsightKind
+  metric: MetricInfo
+  latest: InsightResult
+  /** The previous result; for `big_change`, the first of the results compared. */
+  compared_with: InsightResult | null
+  results_compared: number
+  change: string | null // in the standard unit
+  percent_change: number | null
+  outside_in_a_row: number
+  reference_low: string | null // the latest result's range, in the standard unit
+  reference_high: string | null
+}
+
+export interface InsightExplanation {
+  metric_id: string
+  kind: InsightKind
+  text: string
+}
+
+export interface InsightExplanations {
+  explanations: InsightExplanation[]
+  disclaimer: string
 }
 
 // --- chat ------------------------------------------------------------------------------------

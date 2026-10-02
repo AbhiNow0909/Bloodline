@@ -6,6 +6,8 @@ import type {
   ConfirmReportInput,
   Family,
   FamilyOverview,
+  Insight,
+  InsightExplanations,
   Member,
   MemberInput,
   MetricDefinition,
@@ -229,6 +231,9 @@ export const api = {
   metricHistory: (memberId: string, metricId: string) =>
     request<MetricHistory>(`/patients/${memberId}/metrics/${metricId}`),
   familyOverview: (familyId: string) => request<FamilyOverview>(`/families/${familyId}/overview`),
+  insights: (memberId: string) => request<Insight[]>(`/patients/${memberId}/insights`),
+  explainInsights: (memberId: string) =>
+    request<InsightExplanations>(`/patients/${memberId}/insights/explain`, { method: 'POST' }),
 
   memberChat: (memberId: string, messages: ChatMessage[]) =>
     request<ChatReply>(`/patients/${memberId}/chat`, { method: 'POST', json: { messages } }),

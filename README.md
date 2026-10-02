@@ -41,8 +41,9 @@ Mum's HbA1c changed over the last two years?"* or *"Who in the family has high L
 - **Ask questions**: an AI agent answers from your data, about one member or across a family.
   It uses SQL tools for numbers and semantic search (RAG) for report notes, always limited to
   that member or family. The LLM sees members only as labels ("Member A"), never names.
-- **Flags and trend alerts**: computed in code, not by the LLM. The LLM only writes the
-  plain-language explanation.
+- **Flags and trend alerts**: computed in code, not by the LLM: results outside the lab's
+  range, results back within it, and big changes while still in range. On request, the LLM
+  explains them in plain words from the facts only (no names, no dates).
 
 ## Tech stack
 
@@ -91,6 +92,7 @@ React SPA (Vercel) ──HTTPS + JWT──▶ FastAPI (Docker on Render)
 │   │       ├── normalization/  # metric dictionary, units, ranges
 │   │       ├── embeddings/     # local embeddings
 │   │       ├── agent/          # query agent tools + orchestrator
+│   │       ├── insights/       # range flags, trend alerts, their explanations
 │   │       └── llm/            # Groq client, retry
 │   └── tests/
 │       └── fixtures/       # SYNTHETIC reports only
@@ -101,6 +103,7 @@ React SPA (Vercel) ──HTTPS + JWT──▶ FastAPI (Docker on Render)
 │       ├── pages/          # login, families, family, member, report, test, ask, not found
 │       ├── reports/        # upload, report timeline, review form, saved values, PDF preview
 │       ├── history/        # latest results, trend chart, family overview
+│       ├── insights/       # "What stands out" panel and its wording
 │       ├── chat/           # chat panel, conversation state, answer formatting
 │       ├── auth/           # route guard
 │       └── test/           # test setup, fake API
@@ -330,6 +333,34 @@ curl -s -X POST http://localhost:8000/families/<family id>/chat \
   one wait for the limit (we retry with backoff, up to about 20 s per wait); most answers take
   1–3 s.
 
+### Flags and trend alerts (insights)
+
+| Endpoint | What it does |
+|---|---|
+| `GET /patients/{id}/insights` | what stands out in a member's results, most important first |
+| `POST /patients/{id}/insights/explain` | plain-language explanations of those findings (AI) |
+
+`GET /families/{id}/overview` also lists each member's findings.
+
+- Computed in Python from each test's results in its standard unit (so different labs'
+  units compare), one finding per test at most:
+  - **outside the range**: the latest result is Low or High (newly, or how many results in a
+    row);
+  - **back in range**: within the range again after the previous result was outside it;
+  - **big change**: still within the range, but moved by at least `TREND_ALERT_PERCENT`
+    (default 25 %) from the first to the latest of the last `TREND_ALERT_RESULTS` (default 3)
+    results.
+
+  Tests not matched to the metric dictionary have no comparable series and are left out (the
+  dashboard still lists them when they are outside the range).
+- **Explanations** are written only when asked (`gpt-oss-120b`, strict JSON), one to three
+  sentences per finding (at most 20). The model gets facts only: the test, what it generally
+  measures (from the dictionary), values, the lab's range and the change; never a name or a
+  date. The no-diagnosis and no-treatment rules of the chat apply, plus: no numbers or dates
+  in the text, and no "you". An explanation containing a number that was not in the facts is
+  dropped. Every reply carries the fixed disclaimer. Nothing is stored; errors as for chat
+  (503 busy or not set up, 502 rejected).
+
 ### Frontend
 
 Start the backend first (above) and create a user with the CLI; there is no sign-up page.
@@ -359,13 +390,18 @@ The app calls the API at `VITE_API_BASE_URL` from the repo-root `.env` (default
   date if the report did not print one. Warnings that the report may be for someone else are
   shown first. Nothing is saved until you press *Save*; leaving with unsaved corrections asks
   first. The server recomputes every number and flag from what you saved.
-- **Results**: a member's page lists the tests whose latest result is outside the lab's range,
-  then every test's latest result by category, and the reports as a timeline. Each test opens
+- **Results**: a member's page starts with **What stands out**: each finding with its status
+  in words (Low, High, Rising, Falling, In range), a sentence ("Moved below the lab's range"),
+  the latest and earlier results and the change in words ("so down 45.20 ng/mL (93.6%)").
+  *Explain in plain words* asks the AI for a short explanation of each finding, shown under
+  it with the "not medical advice" note; explanations are kept while the app is open and are
+  dropped when new results change the findings. Then every test's latest result by
+  category, and the reports as a timeline. Each test opens
   its own page: the latest and previous result, a chart over time with the lab's range as a
   shaded band (Low/High points are triangles, never colour alone), and every result in a
   table. Values from labs that print different units are drawn in one unit.
-- **Family overview**: on a family's page, each member's latest out-of-range results side by
-  side, in words.
+- **Family overview**: on a family's page, each member's findings side by side, each with its
+  own *Explain in plain words* (explanations are shared with the member's page).
 - **Ask a question**: on a member's page (*Ask a question*) or a family's page (*Ask about the
   family*). Start from a suggested question or type your own (Enter asks, Shift+Enter starts a
   new line). While the answer is prepared the page says so, and explains after a few seconds

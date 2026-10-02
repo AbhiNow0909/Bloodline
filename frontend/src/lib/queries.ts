@@ -7,6 +7,7 @@ import { session, type Session } from './session'
 import type {
   ConfirmReportInput,
   Family,
+  Insight,
   Member,
   MemberInput,
   Report,
@@ -58,6 +59,11 @@ export const keys = {
   metricHistory: (memberId: string, metricId: string) =>
     ['members', memberId, 'history', metricId] as const,
   familyOverview: (familyId: string) => ['families', familyId, 'overview'] as const,
+  insights: (memberId: string) => ['members', memberId, 'insights'] as const,
+  // Top level, so saving a report does not refetch them (that would spend AI tokens); the
+  // findings they explain are part of the key, so new findings never show old explanations.
+  explanations: (memberId: string, findings: string) =>
+    ['explanations', memberId, findings] as const,
 }
 
 /** How often a report being read is checked again. Tests shorten it. */
@@ -289,7 +295,31 @@ export const useMetricHistory = (memberId: string, metricId: string) =>
     queryFn: () => api.metricHistory(memberId, metricId),
   })
 
-/** Each member's latest out-of-range values, side by side. */
+/** What the member's results show: out of range, back in range, big changes. */
+export const useInsights = (memberId: string) =>
+  useQuery({ queryKey: keys.insights(memberId), queryFn: () => api.insights(memberId) })
+
+/** Plain-language explanations of `insights`, written by the AI only when `request()` is
+ * called, then kept for half an hour (shared by every page showing these findings). */
+export function useExplanations(memberId: string, insights: Insight[]) {
+  const findings = insights.map((i) => `${i.metric.id}:${i.kind}:${i.latest.report_id}`).join('|')
+  const query = useQuery({
+    queryKey: keys.explanations(memberId, findings),
+    queryFn: () => api.explainInsights(memberId),
+    enabled: false,
+    staleTime: Infinity,
+    gcTime: 30 * 60_000,
+    retry: false,
+  })
+  return {
+    data: query.data,
+    error: query.error,
+    pending: query.isFetching,
+    request: () => void query.refetch(),
+  }
+}
+
+/** Each member's latest out-of-range values and findings, side by side. */
 export const useFamilyOverview = (familyId: string) =>
   useQuery({
     queryKey: keys.familyOverview(familyId),

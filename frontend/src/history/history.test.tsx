@@ -99,19 +99,21 @@ describe('a member’s latest results', () => {
     ])
     renderApp(memberPath)
 
-    const attention = await screen.findByRole('region', {
-      name: "Outside the lab's range in the latest results",
-    })
+    const attention = await screen.findByRole('region', { name: 'What stands out' })
     expect(
       within(attention)
         .getAllByRole('listitem')
         .map((li) => li.textContent),
-    ).toEqual(['Ferritin3.9 ng/mLLow(range: 4.63 – 204.00), 3 Mar 2025'])
+    ).toEqual([
+      "LowFerritinMoved below the lab's range" +
+        "Latest, 3 Mar 2025: 3.9 ng/mL (lab's range 4.63 – 204.00 ng/mL)" +
+        'Before, 1 Mar 2024: 60.1 ng/mL, so down 56.2 ng/mL (93.5%)',
+    ])
     expect(within(attention).getByText(/They are not a diagnosis/)).toBeVisible()
 
     const headings = screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent)
     expect(headings).toEqual([
-      "Outside the lab's range in the latest results",
+      'What stands out',
       'Complete blood count',
       'Iron studies',
       'Other tests',
@@ -134,7 +136,11 @@ describe('a member’s latest results', () => {
     const { amma, memberPath, saved } = setup()
     saved(amma.id, '2025-03-03T02:35:00Z', [ferritin('', '48.3', 'normal')])
     renderApp(memberPath)
-    expect(await screen.findByText("Every latest result is within the lab's range.")).toBeVisible()
+    expect(
+      await screen.findByText(
+        "Every latest result is within the lab's range, with no big changes.",
+      ),
+    ).toBeVisible()
   })
 
   it('refresh after a report is saved', async () => {
@@ -236,19 +242,22 @@ describe('the family overview', () => {
     saved(ravi.id, '2025-06-01T04:00:00Z', [ferritin('', '120', 'normal')])
     renderApp(`/families/${family.id}`)
 
-    const overview = await screen.findByRole('region', {
-      name: "Outside the lab's range, by member",
-    })
+    const overview = await screen.findByRole('region', { name: 'What stands out, by member' })
     const panel = (name: string) => within(overview).getByRole('region', { name })
 
     expect(await within(overview).findByRole('region', { name: 'Amma' })).toHaveTextContent(
-      'AmmaLatest report 3 Mar 2025, 1 testFerritinLow3.9 ng/mL (range: 4.63 – 204.00), 3 Mar 2025',
+      'AmmaLatest report 3 Mar 2025, 1 test' +
+        "LowFerritinBelow the lab's range (first result of this test)" +
+        "Latest, 3 Mar 2025: 3.9 ng/mL (lab's range 4.63 – 204.00 ng/mL)" +
+        'Explain in plain words',
     )
     expect(within(panel('Amma')).getByRole('link', { name: 'Ferritin' })).toHaveAttribute(
       'href',
       `/families/${family.id}/members/${amma.id}/tests/metric-ferritin`,
     )
-    expect(panel('Ravi')).toHaveTextContent("Every latest result is within the lab's range.")
+    expect(panel('Ravi')).toHaveTextContent(
+      "Every latest result is within the lab's range, with no big changes.",
+    )
     expect(panel('Appa')).toHaveTextContent('No saved results yet')
     expect(within(panel('Appa')).getByRole('link', { name: 'Appa' })).toHaveAttribute(
       'href',

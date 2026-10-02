@@ -11,14 +11,12 @@ import { Link } from 'react-router'
 
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
+import { WaitingNote } from '../components/WaitingNote'
 import { formatDate } from '../lib/format'
 import type { ChatSource } from '../lib/types'
 import { reportPath } from '../reports/labels'
 import { parseAnswer, type Span } from './answerText'
 import { MAX_MESSAGE_CHARS, useConversation, type ChatKind, type Exchange } from './conversation'
-
-/** After this long, the waiting message explains that the free AI service may be busy. */
-const SLOW_AFTER_MS = 8_000
 
 function Spans({ spans }: { spans: Span[] }) {
   return spans.map((span, index) =>
@@ -102,31 +100,6 @@ function Sources({
   )
 }
 
-function Waiting({ subject }: { subject: string }) {
-  const [slow, setSlow] = useState(false)
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setSlow(true)
-    }, SLOW_AFTER_MS)
-    return () => {
-      clearTimeout(timer)
-    }
-  }, [])
-  return (
-    <p className="flex items-start gap-2 text-muted">
-      <Icon name="clock" className="mt-1 size-5 motion-safe:animate-pulse" />
-      <span>
-        Looking through {subject}…
-        {slow && (
-          <span className="block">
-            Still working. When the free AI service is busy, an answer can take up to a minute.
-          </span>
-        )}
-      </span>
-    </p>
-  )
-}
-
 function ExchangeView({
   exchange,
   subject,
@@ -153,7 +126,7 @@ function ExchangeView({
           {exchange.question}
         </p>
       </div>
-      {exchange.status === 'waiting' && <Waiting subject={subject} />}
+      {exchange.status === 'waiting' && <WaitingNote>Looking through {subject}…</WaitingNote>}
       {exchange.status === 'failed' && (
         <div
           role="alert"

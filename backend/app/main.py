@@ -1,7 +1,17 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import auth, chat, families, health, history, metric_dictionary, patients, reports
+from app.api import (
+    auth,
+    chat,
+    families,
+    health,
+    history,
+    insights,
+    metric_dictionary,
+    patients,
+    reports,
+)
 from app.api.errors import register_error_handlers
 from app.config import get_settings
 
@@ -25,6 +35,7 @@ def create_app() -> FastAPI:
     app.include_router(history.router)
     app.include_router(metric_dictionary.router)
     app.include_router(chat.router)
+    app.include_router(insights.router)
     return app
 
 

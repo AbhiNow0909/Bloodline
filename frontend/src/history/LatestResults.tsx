@@ -4,11 +4,11 @@ import { Icon } from '../components/Icon'
 import { ResponsiveTable } from '../components/ResponsiveTable'
 import { ErrorState, LoadingState } from '../components/States'
 import { formatDate, pluralize } from '../lib/format'
-import { useCatalog } from '../lib/queries'
-import type { CatalogEntry } from '../lib/types'
+import { InsightsPanel } from '../insights/InsightsPanel'
+import { useCatalog, useInsights } from '../lib/queries'
+import type { CatalogEntry, FlaggedReading } from '../lib/types'
 import { rangeText } from '../lib/values'
 import { FlagLabel } from '../reports/FlagLabel'
-import { NotDiagnosis } from '../reports/NotDiagnosis'
 import { testPath } from './paths'
 
 const isFlagged = (entry: CatalogEntry) =>
@@ -37,13 +37,15 @@ function TestName({
   )
 }
 
-/** The member's dashboard: what is outside the range now, then every test's latest result,
- * grouped by category. Each test opens its chart. */
+/** The member's dashboard: what stands out (outside the range, back in range, big changes),
+ * then every test's latest result, grouped by category. Each test opens its chart. */
 export function LatestResults({ familyId, memberId }: { familyId: string; memberId: string }) {
   const catalog = useCatalog(memberId)
+  const insights = useInsights(memberId)
 
-  if (catalog.isPending) return <LoadingState label="Loading results…" />
+  if (catalog.isPending || insights.isPending) return <LoadingState label="Loading results…" />
   if (catalog.isError) return <ErrorState error={catalog.error} />
+  if (insights.isError) return <ErrorState error={insights.error} />
   if (catalog.data.length === 0) {
     return (
       <p className="max-w-prose text-muted">
@@ -52,7 +54,10 @@ export function LatestResults({ familyId, memberId }: { familyId: string; member
     )
   }
 
-  const flagged = catalog.data.filter(isFlagged)
+  // Tests not in the dictionary have no trends; still list them when outside the range.
+  const others: FlaggedReading[] = catalog.data
+    .filter((entry) => !entry.metric && isFlagged(entry))
+    .map((entry) => ({ ...entry.latest, name: entry.name, category: null }))
   const groups = new Map<string, CatalogEntry[]>()
   for (const entry of catalog.data) {
     const category = entry.metric?.category ?? 'Other tests'
@@ -61,40 +66,17 @@ export function LatestResults({ familyId, memberId }: { familyId: string; member
 
   return (
     <div className="flex flex-col gap-8">
-      {flagged.length > 0 ? (
-        <section
-          aria-labelledby="attention-heading"
-          className="rounded-lg border border-line border-l-4 border-l-alert bg-surface p-5"
-        >
-          <h3 id="attention-heading" className="flex items-center gap-2 font-semibold">
-            <Icon name="alert" className="size-5 text-alert" />
-            Outside the lab's range in the latest results
-          </h3>
-          <ul className="mt-3 flex flex-col gap-2">
-            {flagged.map((entry) => (
-              <li
-                key={entry.metric?.id ?? entry.name}
-                className="flex flex-wrap items-baseline gap-x-3"
-              >
-                <span className="font-semibold">
-                  <TestName entry={entry} familyId={familyId} memberId={memberId} />
-                </span>
-                <span>{result(entry)}</span>
-                <FlagLabel flag={entry.latest.flag} />
-                <span className="text-sm text-muted">
-                  (range: {rangeText(entry.latest)}), {formatDate(entry.latest.collected_at)}
-                </span>
-              </li>
-            ))}
-          </ul>
-          <div className="mt-3">
-            <NotDiagnosis />
-          </div>
-        </section>
+      {insights.data.length + others.length > 0 ? (
+        <InsightsPanel
+          familyId={familyId}
+          memberId={memberId}
+          insights={insights.data}
+          others={others}
+        />
       ) : (
         <p className="flex items-center gap-2">
           <Icon name="check" className="size-5 text-edta" />
-          Every latest result is within the lab's range.
+          Every latest result is within the lab's range, with no big changes.
         </p>
       )}
 

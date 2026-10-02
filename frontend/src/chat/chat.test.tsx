@@ -50,7 +50,7 @@ describe('asking about one member', () => {
     api.answerChat(
       'Two results were outside the range on **3 Mar 2025**:\n- Ferritin low\n- LDL high',
     )
-    const release = api.holdChat()
+    const release = api.holdAi()
     const { user } = renderApp(askPath)
 
     await user.click(
@@ -88,7 +88,7 @@ describe('asking about one member', () => {
   it('explains a long wait', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     const { api, askPath } = setup()
-    const release = api.holdChat()
+    const release = api.holdAi()
     const { user } = renderApp(askPath)
     await user.type(
       await screen.findByRole('textbox', { name: 'Your question' }),
@@ -102,7 +102,7 @@ describe('asking about one member', () => {
     })
     expect(
       screen.getByText(
-        'Still working. When the free AI service is busy, an answer can take up to a minute.',
+        'Still working. When the free AI service is busy, this can take up to a minute.',
       ),
     ).toBeVisible()
     release()
@@ -178,7 +178,7 @@ describe('asking about one member', () => {
     expect(screen.getByRole('button', { name: 'Ask' })).toBeDisabled() // box is empty again
 
     // One question at a time: no retry while another is being answered.
-    const release = api.holdChat()
+    const release = api.holdAi()
     await user.type(questionBox(), 'Another?{Enter}')
     expect(within(alert).getByRole('button', { name: 'Try again' })).toBeDisabled()
     busy = false
@@ -236,7 +236,7 @@ describe('asking about one member', () => {
 
   it('drops an answer that arrives after the user logged out', async () => {
     const { api, askPath } = setup()
-    const release = api.holdChat()
+    const release = api.holdAi()
     const { user, router, queryClient } = renderApp(askPath)
     await user.type(
       await screen.findByRole('textbox', { name: 'Your question' }),
