@@ -185,3 +185,25 @@ export interface FamilyOverview {
   name: string
   members: MemberOverview[]
 }
+
+// --- chat ------------------------------------------------------------------------------------
+
+export interface ChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+/** A report an answer drew on. */
+export interface ChatSource {
+  report_id: string
+  collected_at: string
+  lab_name: string | null
+  member_id: string
+  member_name: string
+}
+
+export interface ChatReply {
+  reply: string
+  sources: ChatSource[]
+  disclaimer: string
+}

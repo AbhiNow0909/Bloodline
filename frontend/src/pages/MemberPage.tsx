@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
 
-import { Button } from '../components/Button'
+import { Button, ButtonLink } from '../components/Button'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { Dialog } from '../components/Dialog'
 import { Icon } from '../components/Icon'
@@ -62,6 +62,13 @@ export function MemberPage() {
         leading={<MemberChip id={member.data.id} name={name} size="lg" />}
         actions={
           <>
+            <ButtonLink
+              variant="primary"
+              icon="chat"
+              to={`/families/${familyId}/members/${memberId}/ask`}
+            >
+              Ask a question
+            </ButtonLink>
             <Button
               variant="secondary"
               icon="pencil"

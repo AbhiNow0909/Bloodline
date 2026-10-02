@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -51,6 +51,14 @@ class _Args(BaseModel):
     model_config = ConfigDict(extra="ignore")  # tolerate stray keys from the model
 
     member: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _null_means_left_out(cls, data: Any) -> Any:
+        # The model sends null for optional arguments it does not use.
+        if isinstance(data, dict):
+            return {key: value for key, value in data.items() if value is not None}
+        return data
 
 
 class _MetricArgs(_Args):
@@ -160,11 +168,13 @@ class ToolContext:
         for tool in TOOLS:
             parameters = json.loads(json.dumps(tool.parameters))
             if self.scope.kind == "family":
-                parameters["properties"]["member"] = {
-                    "type": "string",
-                    "enum": self.scope.labels,
-                    "description": "Only this family member. Leave out for every member.",
-                }
+                parameters["properties"]["member"] = _optional(
+                    {
+                        "type": "string",
+                        "enum": self.scope.labels,
+                        "description": "Only this family member. Leave out for every member.",
+                    }
+                )
             specs.append(
                 {
                     "type": "function",
@@ -590,11 +600,23 @@ def _search_report_text(ctx: ToolContext, args: _SearchArgs) -> dict[str, Any]:
     }
 
 
+def _optional(prop: dict[str, Any]) -> dict[str, Any]:
+    """An optional argument also accepts null. The model sends null for arguments it does not
+    use, and Groq rejects the whole call (400 `tool_use_failed`) if the schema forbids it."""
+    nullable = {**prop, "type": [prop["type"], "null"]}
+    if "enum" in prop:
+        nullable["enum"] = [*prop["enum"], None]
+    return nullable
+
+
 def _schema(properties: dict[str, Any], required: list[str] | None = None) -> dict[str, Any]:
+    required = required or []
     return {
         "type": "object",
-        "properties": properties,
-        "required": required or [],
+        "properties": {
+            name: prop if name in required else _optional(prop) for name, prop in properties.items()
+        },
+        "required": required,
         "additionalProperties": False,
     }
 

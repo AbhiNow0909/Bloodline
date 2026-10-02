@@ -19,6 +19,9 @@ if (typeof dialogProto.showModal !== 'function') {
   }
 }
 
+// jsdom does not lay out pages, so it has no scrolling either.
+Element.prototype.scrollIntoView = () => {}
+
 afterEach(() => {
   cleanup()
   session.clear()

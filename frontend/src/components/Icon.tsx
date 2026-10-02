@@ -19,6 +19,7 @@ const PATHS = {
   refresh: ['M20 11a8 8 0 1 0-2.3 5.7', 'M20 5v6h-6'],
   external: ['M14 4h6v6', 'M20 4l-9 9', 'M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5'],
   undo: ['M9 14L4 9l5-5', 'M4 9h10a6 6 0 0 1 0 12h-3'],
+  chat: ['M4 5h16v11H9l-5 4z', 'M8 9.5h8', 'M8 12.5h5'],
 } as const
 
 export type IconName = keyof typeof PATHS

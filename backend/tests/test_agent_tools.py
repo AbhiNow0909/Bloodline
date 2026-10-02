@@ -47,8 +47,31 @@ def test_tool_specs_offer_member_labels_only_in_family_chats(
     ]
     for spec in specs:
         member_arg = spec["function"]["parameters"]["properties"]["member"]
-        assert member_arg["enum"] == ["Member A", "Member B"]
+        assert member_arg["enum"] == ["Member A", "Member B", None]
     assert "Amma" not in json.dumps(specs)
+
+
+def test_optional_arguments_accept_null(db_session: Session, family: dict[str, Any]) -> None:
+    # gpt-oss sends null for optional arguments it does not use; Groq rejects the whole
+    # request when the schema does not allow null, so every optional argument must.
+    for spec in family_tools(db_session, family["amma"], family["appa"]).specs():
+        parameters = spec["function"]["parameters"]
+        for name, prop in parameters["properties"].items():
+            if name not in parameters["required"]:
+                assert "null" in prop["type"], (spec["function"]["name"], name)
+                assert "enum" not in prop or None in prop["enum"]
+            else:
+                assert prop["type"] != "null"
+
+    tools = family_tools(db_session, family["amma"], family["appa"])
+    assert run(tools, "compare_reports", member="Member A", report_a=None, report_b=None) == run(
+        tools, "compare_reports", member="Member A"
+    )
+    assert run(tools, "get_out_of_range", member=None, since=None, include_earlier=None) == run(
+        tools, "get_out_of_range"
+    )
+    assert run(tools, "get_latest_values", metrics=None) == run(tools, "get_latest_values")
+    assert "error" not in run(tools, "search_report_text", query="ferritin method", k=None)
 
 
 def test_list_available_metrics(db_session: Session, family: dict[str, Any]) -> None:

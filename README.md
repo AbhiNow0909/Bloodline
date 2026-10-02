@@ -98,9 +98,10 @@ React SPA (Vercel) ──HTTPS + JWT──▶ FastAPI (Docker on Render)
 │   └── src/
 │       ├── lib/            # API client, session, queries, formatting
 │       ├── components/     # shared UI (buttons, fields, dialogs, folder/file cards)
-│       ├── pages/          # login, families, family, member, report, test, not found
+│       ├── pages/          # login, families, family, member, report, test, ask, not found
 │       ├── reports/        # upload, report timeline, review form, saved values, PDF preview
 │       ├── history/        # latest results, trend chart, family overview
+│       ├── chat/           # chat panel, conversation state, answer formatting
 │       ├── auth/           # route guard
 │       └── test/           # test setup, fake API
 └── .github/workflows/      # CI (deployment comes in Phase 16)
@@ -321,6 +322,9 @@ curl -s -X POST http://localhost:8000/families/<family id>/chat \
   reply carries a fixed disclaimer, and `sources` lists the reports the answer drew on.
 - Errors: no `GROQ_API_KEY` or the AI service busy → 503 with a message to show; the service
   rejecting the request → 502.
+- Optional tool arguments are declared nullable (`"type": ["string", "null"]`): `gpt-oss-120b`
+  sends `null` for arguments it does not use, and Groq rejects the whole request (400
+  `tool_use_failed`) when the schema does not allow it. `null` is treated as left out.
 - **Free tier**: Groq allows `gpt-oss-120b` about 8,000 tokens per minute, and one tool round
   sends about 1,300 tokens plus tool results. Several questions in one minute make the next
   one wait for the limit (we retry with backoff, up to about 20 s per wait); most answers take
@@ -362,6 +366,18 @@ The app calls the API at `VITE_API_BASE_URL` from the repo-root `.env` (default
   table. Values from labs that print different units are drawn in one unit.
 - **Family overview**: on a family's page, each member's latest out-of-range results side by
   side, in words.
+- **Ask a question**: on a member's page (*Ask a question*) or a family's page (*Ask about the
+  family*). Start from a suggested question or type your own (Enter asks, Shift+Enter starts a
+  new line). While the answer is prepared the page says so, and explains after a few seconds
+  that the free AI service can take up to a minute when busy. Each answer lists the saved
+  reports it drew on (with the member's name in family chat; each opens that report) and ends
+  with the "not medical advice" note. A failed question shows why, with *Try again*. The page
+  says what the AI is told instead of names ("the patient", "Member A").
+- A conversation stays while you move around the app (for half an hour), and is forgotten on
+  logout, on reload or with *Start a new conversation*. Each question is sent with the last
+  four questions and answers so follow-ups ("and the one before?") work; nothing is stored on
+  the server. Answers are shown as plain text: simple lists and bold from the model are
+  formatted, and nothing in an answer is ever treated as HTML.
 - The sign-in token is kept in the browser's `localStorage` until it expires (24 h by
   default), so a reload stays signed in. Logging out, an expired token or a rejected token
   signs out every tab and clears everything cached in the page.

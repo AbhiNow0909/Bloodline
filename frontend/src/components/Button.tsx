@@ -1,4 +1,5 @@
 import type { ButtonHTMLAttributes } from 'react'
+import { Link, type LinkProps } from 'react-router'
 
 import { Icon, type IconName } from './Icon'
 
@@ -10,6 +11,9 @@ const VARIANTS: Record<Variant, string> = {
   danger: 'bg-alert text-white hover:bg-[#8a1f24]',
   quiet: 'text-edta hover:bg-edta-soft',
 }
+
+const BASE =
+  'inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-4 py-2 font-semibold transition-colors'
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: Variant
@@ -27,11 +31,32 @@ export function Button({
   return (
     <button
       type={type}
-      className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-4 py-2 font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${VARIANTS[variant]} ${className}`}
+      className={`${BASE} disabled:cursor-not-allowed disabled:opacity-60 ${VARIANTS[variant]} ${className}`}
       {...rest}
     >
       {icon && <Icon name={icon} />}
       {children}
     </button>
+  )
+}
+
+interface ButtonLinkProps extends LinkProps {
+  variant?: Variant
+  icon?: IconName
+}
+
+/** A link that goes somewhere, styled like a button (e.g. "Ask a question"). */
+export function ButtonLink({
+  variant = 'secondary',
+  icon,
+  className = '',
+  children,
+  ...rest
+}: ButtonLinkProps) {
+  return (
+    <Link className={`${BASE} ${VARIANTS[variant]} ${className}`} {...rest}>
+      {icon && <Icon name={icon} />}
+      {children}
+    </Link>
   )
 }

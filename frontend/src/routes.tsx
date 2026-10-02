@@ -2,6 +2,7 @@ import { Navigate, type RouteObject } from 'react-router'
 
 import { RequireAuth } from './auth/RequireAuth'
 import { AppLayout } from './components/AppLayout'
+import { FamilyChatPage, MemberChatPage } from './pages/ChatPage'
 import { FamiliesPage } from './pages/FamiliesPage'
 import { FamilyPage } from './pages/FamilyPage'
 import { LoginPage } from './pages/LoginPage'
@@ -25,7 +26,9 @@ export const routes: RouteObject[] = [
           { index: true, element: <Navigate to="/families" replace /> },
           { path: 'families', Component: FamiliesPage },
           { path: 'families/:familyId', Component: FamilyPage },
+          { path: 'families/:familyId/ask', Component: FamilyChatPage },
           { path: 'families/:familyId/members/:memberId', Component: MemberPage },
+          { path: 'families/:familyId/members/:memberId/ask', Component: MemberChatPage },
           {
             path: 'families/:familyId/members/:memberId/reports/:reportId',
             Component: ReportPage,

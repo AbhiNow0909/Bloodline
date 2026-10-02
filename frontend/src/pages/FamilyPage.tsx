@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
 
-import { Button } from '../components/Button'
+import { Button, ButtonLink } from '../components/Button'
 import { FileLink, NewFileButton } from '../components/Cards'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { Dialog } from '../components/Dialog'
@@ -63,6 +63,11 @@ export function FamilyPage() {
         subtitle={pluralize(count, 'member', 'members')}
         actions={
           <>
+            {count > 0 && (
+              <ButtonLink variant="primary" icon="chat" to={`/families/${familyId}/ask`}>
+                Ask about the family
+              </ButtonLink>
+            )}
             <Button
               variant="secondary"
               icon="pencil"

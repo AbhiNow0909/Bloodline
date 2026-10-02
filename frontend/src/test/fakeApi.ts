@@ -8,6 +8,8 @@ import { vi } from 'vitest'
 
 import type {
   CatalogEntry,
+  ChatMessage,
+  ChatReply,
   ConfirmReportInput,
   Family,
   Member,
@@ -49,6 +51,9 @@ interface FakeReport {
 export const USER: User = { id: 'user-1', email: 'asha@example.com', display_name: 'Asha Rao' }
 export const PASSWORD = 'correct horse battery staple'
 
+export const DISCLAIMER =
+  'Not medical advice. Bloodline can describe your results, but only your doctor can say what they mean for you.'
+
 const json = (status: number, body?: unknown): Reply => ({ status, body })
 const notFound = (what: string) => json(404, { detail: `${what} not found` })
 
@@ -58,6 +63,7 @@ export function fakeApi() {
   const reports = new Map<string, FakeReport>()
   const calls: Call[] = []
   const overrides: ((call: Call) => Reply | undefined)[] = []
+  const chatAnswers: string[] = []
   let nextId = 1
 
   const newId = (prefix: string) => `${prefix}-${String(nextId++)}`
@@ -275,6 +281,31 @@ export function fakeApi() {
     return json(202, report)
   }
 
+  /** Like the real agent: an answer, the saved reports it read, and the disclaimer. Answers
+   * come from `answerChat`, else echo the question. */
+  function chat(call: Call, memberIds: string[]): Reply {
+    const { messages } = call.body as { messages: ChatMessage[] }
+    const question = messages.at(-1)?.content ?? ''
+    const sources = [...reports.values()]
+      .filter((r) => r.report.status === 'confirmed' && memberIds.includes(r.report.patient_id))
+      .map(({ report }) => {
+        const member = members.get(report.patient_id)
+        return {
+          report_id: report.id,
+          collected_at: report.collected_at ?? report.created_at,
+          lab_name: report.lab_name,
+          member_id: report.patient_id,
+          member_name: member?.display_name ?? '',
+        }
+      })
+    const reply: ChatReply = {
+      reply: chatAnswers.shift() ?? `You asked: ${question}`,
+      sources,
+      disclaimer: DISCLAIMER,
+    }
+    return json(200, reply)
+  }
+
   function route(call: Call): Reply {
     for (const override of overrides) {
       const reply = override(call)
@@ -316,6 +347,22 @@ export function fakeApi() {
         if (member.family_id === family.id) members.delete(member.id)
       }
       return json(204)
+    }
+
+    match = /^\/families\/([^/]+)\/chat$/.exec(path)
+    if (match?.[1] && method === 'POST') {
+      const familyId = match[1]
+      if (!families.has(familyId)) return notFound('Family')
+      const ids = [...members.values()].filter((m) => m.family_id === familyId).map((m) => m.id)
+      if (ids.length === 0) {
+        return json(409, { detail: 'Add a family member before asking about this family.' })
+      }
+      return chat(call, ids)
+    }
+
+    match = /^\/patients\/([^/]+)\/chat$/.exec(path)
+    if (match?.[1] && method === 'POST') {
+      return members.has(match[1]) ? chat(call, [match[1]]) : notFound('Patient')
     }
 
     match = /^\/families\/([^/]+)\/overview$/.exec(path)
@@ -425,24 +472,32 @@ export function fakeApi() {
       authorization: headers.get('Authorization'),
     }
     calls.push(call)
-    const reply = route(call)
-    if (reply.file) {
-      return Promise.resolve(
-        new Response(reply.file, {
-          status: reply.status,
-          headers: { 'Content-Type': reply.file.type },
-        }),
-      )
+    // A held chat question waits here until the test releases it.
+    if (chatGate && call.path.endsWith('/chat')) {
+      const reply = chatGate.then(() => respond(call))
+      lastChat = reply.then(() => undefined)
+      return reply
     }
-    const text = reply.body === undefined ? null : JSON.stringify(reply.body)
-    return Promise.resolve(
-      new Response(text, {
-        status: reply.status,
-        headers: text === null ? {} : { 'Content-Type': 'application/json' },
-      }),
-    )
+    return Promise.resolve(respond(call))
   })
   vi.stubGlobal('fetch', fetchMock)
+
+  let chatGate: Promise<void> | null = null
+  let lastChat: Promise<void> = Promise.resolve()
+  function respond(call: Call): Response {
+    const reply = route(call)
+    if (reply.file) {
+      return new Response(reply.file, {
+        status: reply.status,
+        headers: { 'Content-Type': reply.file.type },
+      })
+    }
+    const text = reply.body === undefined ? null : JSON.stringify(reply.body)
+    return new Response(text, {
+      status: reply.status,
+      headers: text === null ? {} : { 'Content-Type': 'application/json' },
+    })
+  }
 
   // Uploads: a minimal XMLHttpRequest that reports progress, then answers through `route`.
   let uploadGate: Promise<void> | null = null
@@ -528,6 +583,28 @@ export function fakeApi() {
     failUploads() {
       uploadFails = true
     },
+    /** The assistant's next answers, in order (otherwise it echoes the question). */
+    answerChat(...answers: string[]) {
+      chatAnswers.push(...answers)
+    },
+    /** Hold chat questions unanswered until the returned function is called. */
+    holdChat() {
+      let release = () => {}
+      chatGate = new Promise((resolve) => {
+        release = () => {
+          chatGate = null
+          resolve()
+        }
+      })
+      return release
+    },
+    /** Settles once the latest held chat question has been answered. */
+    answered: () => lastChat,
+    /** The messages each chat question sent, oldest first. */
+    chatRequests: () =>
+      calls
+        .filter((c) => c.path.endsWith('/chat'))
+        .map((c) => (c.body as { messages: ChatMessage[] }).messages),
     /** Answer matching calls differently (e.g. with an error); return undefined to pass. */
     override(handler: (call: Call) => Reply | undefined) {
       overrides.push(handler)

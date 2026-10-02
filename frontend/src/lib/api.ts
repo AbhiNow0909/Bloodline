@@ -1,6 +1,8 @@
 import { session } from './session'
 import type {
   CatalogEntry,
+  ChatMessage,
+  ChatReply,
   ConfirmReportInput,
   Family,
   FamilyOverview,
@@ -227,4 +229,9 @@ export const api = {
   metricHistory: (memberId: string, metricId: string) =>
     request<MetricHistory>(`/patients/${memberId}/metrics/${metricId}`),
   familyOverview: (familyId: string) => request<FamilyOverview>(`/families/${familyId}/overview`),
+
+  memberChat: (memberId: string, messages: ChatMessage[]) =>
+    request<ChatReply>(`/patients/${memberId}/chat`, { method: 'POST', json: { messages } }),
+  familyChat: (familyId: string, messages: ChatMessage[]) =>
+    request<ChatReply>(`/families/${familyId}/chat`, { method: 'POST', json: { messages } }),
 }
