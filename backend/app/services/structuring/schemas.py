@@ -81,7 +81,7 @@ LLM_REPORT_SCHEMA: dict[str, Any] = {
                             "additionalProperties": False,
                         },
                     },
-                    "method": _nullable_string("Text after 'Method :' for this test"),
+                    "method": _nullable_string("Text after 'Method :' or in '(Method: ...)'"),
                     "sample_type": _nullable_string("From the preceding 'Sample type:' line"),
                 },
                 "required": [

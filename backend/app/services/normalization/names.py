@@ -30,6 +30,8 @@ class DictionaryEntry:
 
 
 def _candidates(raw_name: str, sample_type: str | None) -> list[str]:
+    # A trailing "*" or "#" marks a test outside the lab's accreditation, not part of its name.
+    raw_name = raw_name.strip().rstrip("*#").rstrip()
     names = [raw_name]
     without_suffix = re.sub(r"\s*\([^()]*\)\s*$", "", raw_name)  # "… RATIO (UA/C)"
     if without_suffix != raw_name:

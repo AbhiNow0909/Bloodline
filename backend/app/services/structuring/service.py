@@ -5,12 +5,15 @@ matches and flags are all derived here, deterministically, and every copied valu
 against the source text so a hallucinated number is caught in review, not saved.
 """
 
+from dataclasses import dataclass
+from functools import partial
+
 from pydantic import ValidationError
 
 from app.models import Sex
 from app.services.extraction import ExtractedReport, PiiLeakError
 from app.services.extraction.pii import find_leaks
-from app.services.llm import ChatClient
+from app.services.llm import ChatClient, LLMRefusalError, LLMTooLargeError
 from app.services.normalization import (
     MetricIndex,
     RangeLine,
@@ -108,23 +111,45 @@ def normalize_test(
 MAX_PART_CHARS = 6_000
 
 
-def report_parts(report: ExtractedReport) -> list[str]:
+@dataclass(frozen=True)
+class ReportPart:
+    page_numbers: tuple[int, ...]  # in the original PDF
+    pages: tuple[str, ...]  # each page's scrubbed text, labelled with its sample type
+
+    @property
+    def text(self) -> str:
+        return "\n\n".join(self.pages)
+
+    def single_pages(self) -> list["ReportPart"]:
+        return [ReportPart((n,), (p,)) for n, p in zip(self.page_numbers, self.pages, strict=True)]
+
+
+def report_parts(report: ExtractedReport) -> list[ReportPart]:
     """The text to send, in parts of whole pages, in page order."""
-    parts: list[list[str]] = []
+    parts: list[ReportPart] = []
     size = 0
-    for page in report.page_llm_texts():
+    for number, page in zip(
+        (p.page_number for p in report.pages), report.page_llm_texts(), strict=True
+    ):
         if parts and size + 2 + len(page) <= MAX_PART_CHARS:  # 2: the blank line between
-            parts[-1].append(page)
+            last = parts[-1]
+            parts[-1] = ReportPart((*last.page_numbers, number), (*last.pages, page))
             size += 2 + len(page)
         else:
-            parts.append([page])
+            parts.append(ReportPart((number,), (page,)))
             size = len(page)
-    return ["\n\n".join(pages) for pages in parts]
+    return parts
+
+
+def unread_page_warning(page_number: int) -> str:
+    return (
+        f"The AI could not read page {page_number} of the PDF, so its results are not listed "
+        'here. Add them from the PDF with "Add a test that was missed".'
+    )
 
 
 def _structure_part(
     text: str,
-    report: ExtractedReport,
     *,
     patient_sex: Sex,
     metric_index: MetricIndex,
@@ -149,6 +174,12 @@ def _structure_part(
     ]
 
 
+# A reply the model declined or broke (see `structure_report`) is asked for again this many
+# times in all before the text is split or left out. Groq's output varies between identical
+# requests, so a second try usually succeeds.
+ATTEMPTS = 2
+
+
 def structure_report(
     report: ExtractedReport,
     *,
@@ -158,22 +189,54 @@ def structure_report(
     model: str,
 ) -> StructuredReport:
     """Only `report.llm_text()` (scrubbed results) is ever sent to the LLM, in parts of whole
-    pages when it is large (`MAX_PART_CHARS`). Any part failing fails the whole report."""
+    pages when it is large (`MAX_PART_CHARS`).
+
+    gpt-oss now and then declines a request ("I'm sorry, but I can't help with that") or
+    returns JSON in a broken shape, and not the same way twice. Such a part is asked for again;
+    if it still fails, its pages are read one at a time, and a page that still fails is left out
+    with a review warning, so the person adds those results from the PDF (the review shows it
+    alongside). A part too large for the free tier's per-minute limit is also read page by
+    page. Any other error (service busy, request rejected) fails the whole report."""
     parts = report_parts(report)
-    for text in parts:  # second check, right at the LLM boundary, before anything is sent
-        if leaks := find_leaks(text, report.identity):
+    for part in parts:  # second check, right at the LLM boundary, before anything is sent
+        if leaks := find_leaks(part.text, report.identity):
             raise PiiLeakError(f"Identity data found in text meant for the AI ({', '.join(leaks)})")
-    metrics = tuple(
-        metric
-        for text in parts
-        for metric in _structure_part(
-            text,
-            report,
-            patient_sex=patient_sex,
-            metric_index=metric_index,
-            client=client,
-            model=model,
-        )
+    structure = partial(
+        _structure_part,
+        patient_sex=patient_sex,
+        metric_index=metric_index,
+        client=client,
+        model=model,
     )
-    warnings = () if metrics else ("No test results were found in the report.",)
-    return StructuredReport(model=model, metrics=metrics, warnings=warnings)
+
+    def attempt(text: str) -> list[StructuredMetric] | None:
+        for _ in range(ATTEMPTS):
+            try:
+                return structure(text)
+            except (LLMRefusalError, StructuringError):
+                continue
+        return None
+
+    metrics: list[StructuredMetric] = []
+    warnings: list[str] = []
+    pending = list(parts)
+    while pending:
+        part = pending.pop(0)
+        try:
+            rows = attempt(part.text)
+        except LLMTooLargeError:
+            if len(part.pages) == 1:
+                raise
+            pending[:0] = part.single_pages()  # smaller requests fit
+            continue
+        if rows is not None:
+            metrics += rows
+        elif len(part.pages) > 1:
+            pending[:0] = part.single_pages()
+        else:
+            warnings.append(unread_page_warning(part.page_numbers[0]))
+    if not metrics and warnings:  # no page could be read
+        raise StructuringError("The AI could not read this report. Please try again later.")
+    if not metrics:
+        warnings.append("No test results were found in the report.")
+    return StructuredReport(model=model, metrics=tuple(metrics), warnings=tuple(warnings))

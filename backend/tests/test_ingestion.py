@@ -92,7 +92,7 @@ def test_success_stores_scrubbed_extraction_and_rows(db_session: Session) -> Non
             "busy",
             id="llm-busy",
         ),
-        pytest.param(PDF, FakeChatClient("{}"), "unexpected shape", id="bad-llm-reply"),
+        pytest.param(PDF, FakeChatClient("{}"), "could not read this report", id="bad-llm-reply"),
         pytest.param(PDF, FakeChatClient(RuntimeError("boom")), UNEXPECTED_FAILURE, id="bug"),
     ],
 )

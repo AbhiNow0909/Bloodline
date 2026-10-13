@@ -13,7 +13,9 @@ from app.services.llm import (
     AgentTurn,
     GroqChatClient,
     LLMNotConfiguredError,
+    LLMRefusalError,
     LLMRequestError,
+    LLMTooLargeError,
     LLMUnavailableError,
     ToolCall,
     get_agent_client,
@@ -143,8 +145,20 @@ def test_a_reply_that_is_not_json_is_an_error(
 ) -> None:
     fake = FakeCreate("Sure! Here are the results: ...")
 
-    with pytest.raises(LLMRequestError, match="not JSON"):
+    with pytest.raises(LLMRefusalError, match="not JSON"):
         complete(make_client(monkeypatch, fake, sleeps))
+
+
+def test_a_refusal_in_place_of_json_is_a_refusal_error(
+    monkeypatch: pytest.MonkeyPatch, sleeps: list[float]
+) -> None:
+    # gpt-oss declining a request: Groq reports the reply as failing the schema.
+    fake = FakeCreate(rejected("json_validate_failed", "I'm sorry, but I can't help with that."))
+
+    with pytest.raises(LLMRefusalError) as excinfo:
+        complete(make_client(monkeypatch, fake, sleeps))
+    assert isinstance(excinfo.value, LLMRequestError)  # still a request error for callers
+    assert len(fake.calls) == 1
 
 
 def test_backoff_doubles_with_jitter_and_is_capped() -> None:
@@ -306,9 +320,29 @@ def test_a_too_large_request_is_explained_and_not_retried(
 ) -> None:
     fake = FakeCreate(status_error(groq.APIStatusError, 413))
 
-    with pytest.raises(LLMRequestError, match="too large for the AI service's free tier"):
+    with pytest.raises(LLMTooLargeError, match="too large for the AI service's free tier"):
         complete(make_client(monkeypatch, fake, sleeps))
     assert len(fake.calls) == 1
+
+
+def test_the_size_numbers_from_groq_are_kept(
+    monkeypatch: pytest.MonkeyPatch, sleeps: list[float]
+) -> None:
+    message = (
+        "Request too large for model `openai/gpt-oss-20b` in organization `org_x` service tier "
+        "`on_demand` on tokens per minute (TPM): Limit 8000, Requested 9207, please reduce"
+    )
+    error = groq.APIStatusError(
+        "error", response=httpx.Response(413, request=REQUEST), body={"error": {"message": message}}
+    )
+
+    with pytest.raises(LLMTooLargeError) as excinfo:
+        complete(make_client(monkeypatch, FakeCreate(error), sleeps))
+    assert str(excinfo.value) == (
+        "The text was too large for the AI service's free tier "
+        "(requested 9207 of 8000 tokens, TPM)."
+    )
+    assert "org_x" not in str(excinfo.value)
 
 
 def test_a_patient_client_waits_as_long_as_retry_after_asks(
@@ -325,9 +359,46 @@ def test_a_patient_client_waits_as_long_as_retry_after_asks(
     assert sleeps == [45.0] * 5
 
     sleeps.clear()
-    with pytest.raises(LLMUnavailableError):
-        complete(make_client(monkeypatch, busy(), sleeps))  # the usual client gives up sooner
-    assert sleeps == [20.0] * 3
+    with pytest.raises(LLMUnavailableError, match="try again in a minute"):
+        complete(make_client(monkeypatch, busy(), sleeps))  # the usual client does not wait 45 s
+    assert sleeps == []
+
+
+def daily_limit(retry_after: str) -> groq.RateLimitError:
+    message = (
+        "Rate limit reached for model `openai/gpt-oss-20b` in organization `org_x` on tokens "
+        "per day (TPD): Limit 200000, Used 198937, Requested 4584. Please try again in 25m21s."
+    )
+    return groq.RateLimitError(
+        "error",
+        response=httpx.Response(429, headers={"retry-after": retry_after}, request=REQUEST),
+        body={"error": {"message": message}},
+    )
+
+
+@pytest.mark.parametrize(
+    ("error", "message"),
+    [
+        (daily_limit("1522"), "free daily limit is used up. Please try again in about 25 minutes."),
+        (daily_limit("9000"), "free daily limit is used up. Please try again in about 2 hours."),
+        (
+            status_error(groq.RateLimitError, 429, {"retry-after": "600"}),
+            "The AI service is busy. Please try again in about 10 minutes.",
+        ),
+    ],
+)
+def test_a_long_wait_is_not_retried_and_says_when_to_try_again(
+    monkeypatch: pytest.MonkeyPatch, sleeps: list[float], error: Exception, message: str
+) -> None:
+    fake = FakeCreate(error)
+    patient = GroqChatClient(FAKE_KEY, attempts=6, max_delay=60.0, sleep=sleeps.append)
+    monkeypatch.setattr(patient._client.chat.completions, "create", fake)
+
+    with pytest.raises(LLMUnavailableError) as excinfo:
+        complete(patient)
+    assert message in str(excinfo.value)
+    assert "org_x" not in str(excinfo.value)
+    assert (len(fake.calls), sleeps) == (1, [])
 
 
 def test_reports_are_read_patiently_and_explanations_quickly(

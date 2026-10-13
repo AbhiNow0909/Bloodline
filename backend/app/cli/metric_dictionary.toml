@@ -189,7 +189,7 @@ description = "Number of eosinophils per volume of blood."
 canonical_name = "Absolute Basophil Count"
 category = "Complete Blood Count"
 canonical_unit = "10^3/uL"
-aliases = ["Basophils - Absolute Count"]
+aliases = ["Basophils - Absolute Count", "Absolute Basophils Count"]
 description = "Number of basophils per volume of blood."
 
 [[metric]]
@@ -214,14 +214,14 @@ description = "Total amount of cholesterol carried in the blood."
 canonical_name = "HDL Cholesterol"
 category = "Lipid Profile"
 canonical_unit = "mg/dL"
-aliases = ["HDL", "HDL-C", "HDL Cholesterol - Direct"]
+aliases = ["HDL", "HDL-C", "HDL Cholesterol - Direct", "Cholesterol - HDL"]
 description = "Cholesterol carried by high-density lipoprotein, often called 'good' cholesterol."
 
 [[metric]]
 canonical_name = "LDL Cholesterol"
 category = "Lipid Profile"
 canonical_unit = "mg/dL"
-aliases = ["LDL", "LDL-C", "LDL Cholesterol - Direct"]
+aliases = ["LDL", "LDL-C", "LDL Cholesterol - Direct", "Cholesterol - LDL"]
 description = "Cholesterol carried by low-density lipoprotein, often called 'bad' cholesterol."
 
 [[metric]]
@@ -235,35 +235,40 @@ description = "A type of fat in the blood, influenced by recent meals and diet."
 canonical_name = "VLDL Cholesterol"
 category = "Lipid Profile"
 canonical_unit = "mg/dL"
-aliases = ["VLDL"]
+aliases = ["VLDL", "Cholesterol VLDL", "Cholesterol - VLDL"]
 description = "Cholesterol carried by very-low-density lipoprotein, which mainly transports triglycerides."
 
 [[metric]]
 canonical_name = "Non-HDL Cholesterol"
 category = "Lipid Profile"
 canonical_unit = "mg/dL"
-aliases = ["Non HDL Cholesterol", "Non-HDL-C"]
+aliases = ["Non HDL Cholesterol", "Non-HDL-C", "Cholesterol - Non-HDL"]
 description = "Total cholesterol minus HDL cholesterol."
 
 [[metric]]
 canonical_name = "Total Cholesterol/HDL Ratio"
 category = "Lipid Profile"
 canonical_unit = "ratio"
-aliases = ["TC/HDL Ratio", "TC/HDL Cholesterol Ratio", "Cholesterol/HDL Ratio"]
+aliases = [
+    "TC/HDL Ratio",
+    "TC/HDL Cholesterol Ratio",
+    "Cholesterol/HDL Ratio",
+    "Total Cholesterol/HDL",
+]
 description = "Total cholesterol divided by HDL cholesterol."
 
 [[metric]]
 canonical_name = "LDL/HDL Ratio"
 category = "Lipid Profile"
 canonical_unit = "ratio"
-aliases = ["LDL/HDL Cholesterol Ratio"]
+aliases = ["LDL/HDL Cholesterol Ratio", "LDL/HDL"]
 description = "LDL cholesterol divided by HDL cholesterol."
 
 [[metric]]
 canonical_name = "HDL/LDL Ratio"
 category = "Lipid Profile"
 canonical_unit = "ratio"
-aliases = ["HDL/LDL Cholesterol Ratio"]
+aliases = ["HDL/LDL Cholesterol Ratio", "HDL/LDL"]
 description = "HDL cholesterol divided by LDL cholesterol."
 
 [[metric]]
@@ -288,14 +293,14 @@ description = "Pigment produced when red blood cells break down; processed by th
 canonical_name = "Direct Bilirubin"
 category = "Liver Function"
 canonical_unit = "mg/dL"
-aliases = ["Bilirubin - Direct", "Conjugated Bilirubin"]
+aliases = ["Bilirubin - Direct", "Conjugated Bilirubin", "Bilirubin Direct"]
 description = "Bilirubin that has already been processed (conjugated) by the liver."
 
 [[metric]]
 canonical_name = "Indirect Bilirubin"
 category = "Liver Function"
 canonical_unit = "mg/dL"
-aliases = ["Bilirubin - Indirect", "Unconjugated Bilirubin"]
+aliases = ["Bilirubin - Indirect", "Unconjugated Bilirubin", "Bilirubin Indirect"]
 description = "Bilirubin not yet processed by the liver."
 
 [[metric]]
@@ -316,7 +321,7 @@ description = "Enzyme found in the liver, heart and muscles."
 canonical_name = "AST/ALT Ratio"
 category = "Liver Function"
 canonical_unit = "ratio"
-aliases = ["SGOT/SGPT Ratio"]
+aliases = ["SGOT/SGPT Ratio", "AST/ALT"]
 description = "AST divided by ALT."
 
 [[metric]]
@@ -337,7 +342,7 @@ description = "Enzyme found mainly in the liver and bile ducts."
 canonical_name = "Total Protein"
 category = "Liver Function"
 canonical_unit = "g/dL"
-aliases = ["Protein - Total", "Serum Total Protein"]
+aliases = ["Protein - Total", "Serum Total Protein", "Protein Total"]
 description = "Total amount of albumin and globulin proteins in the blood."
 
 [[metric]]
@@ -358,7 +363,7 @@ description = "Group of blood proteins that includes antibodies."
 canonical_name = "Albumin/Globulin Ratio"
 category = "Liver Function"
 canonical_unit = "ratio"
-aliases = ["A/G Ratio", "Serum Alb/Globulin Ratio"]
+aliases = ["A/G Ratio", "Serum Alb/Globulin Ratio", "Albumin/Globulin"]
 description = "Albumin divided by globulin."
 
 # ---------------------------------------------------------------------------
@@ -390,14 +395,19 @@ description = "The nitrogen portion of urea in the blood."
 canonical_name = "BUN/Creatinine Ratio"
 category = "Kidney Function"
 canonical_unit = "ratio"
-aliases = ["BUN/Sr.Creatinine Ratio", "BUN / Sr.Creatinine Ratio"]
+aliases = [
+    "BUN/Sr.Creatinine Ratio",
+    "BUN / Sr.Creatinine Ratio",
+    "BUN/Creatinine",
+    "Blood Urea Nitrogen (BUN)/Creatinine",
+]
 description = "Blood urea nitrogen divided by creatinine."
 
 [[metric]]
 canonical_name = "Urea/Creatinine Ratio"
 category = "Kidney Function"
 canonical_unit = "ratio"
-aliases = ["Urea/Sr.Creatinine Ratio", "Urea / Sr.Creatinine Ratio"]
+aliases = ["Urea/Sr.Creatinine Ratio", "Urea / Sr.Creatinine Ratio", "Urea/Creatinine"]
 description = "Blood urea divided by creatinine."
 
 [[metric]]
@@ -418,7 +428,7 @@ description = "Estimate of how much blood the kidneys filter per minute, calcula
 canonical_name = "Calcium"
 category = "Kidney Function"
 canonical_unit = "mg/dL"
-aliases = ["Serum Calcium", "Total Calcium"]
+aliases = ["Serum Calcium", "Total Calcium", "Calcium - Serum"]
 description = "Mineral important for bones, muscles and nerves."
 
 # ---------------------------------------------------------------------------
@@ -461,14 +471,14 @@ description = "Pituitary hormone that signals the thyroid gland to make thyroid 
 canonical_name = "Total T3"
 category = "Thyroid"
 canonical_unit = "ng/dL"
-aliases = ["T3", "Total Triiodothyronine", "Triiodothyronine (T3)"]
+aliases = ["T3", "Total Triiodothyronine", "Triiodothyronine (T3)", "TT3", "Triiodothyronine Total"]
 description = "Total amount of triiodothyronine, an active thyroid hormone."
 
 [[metric]]
 canonical_name = "Total T4"
 category = "Thyroid"
 canonical_unit = "ug/dL"
-aliases = ["T4", "Total Thyroxine", "Thyroxine (T4)"]
+aliases = ["T4", "Total Thyroxine", "Thyroxine (T4)", "TT4", "Thyroxine - Total"]
 description = "Total amount of thyroxine, the main hormone made by the thyroid."
 
 [[metric]]
@@ -521,7 +531,7 @@ description = "Blood glucose measured about two hours after a meal."
 canonical_name = "Random Blood Glucose"
 category = "Diabetes"
 canonical_unit = "mg/dL"
-aliases = ["RBS", "Random Blood Sugar"]
+aliases = ["RBS", "Random Blood Sugar", "Glucose - Random"]
 description = "Blood glucose measured at any time, regardless of meals."
 
 # ---------------------------------------------------------------------------
@@ -553,7 +563,7 @@ description = "The part of the blood's iron-carrying capacity not currently in u
 canonical_name = "Transferrin Saturation"
 category = "Iron Studies"
 canonical_unit = "%"
-aliases = ["TSAT", "% Transferrin Saturation", "Iron Saturation"]
+aliases = ["TSAT", "% Transferrin Saturation", "Iron Saturation", "Transferrin %"]
 description = "Share of the blood's iron-carrying capacity that is filled with iron."
 
 [[metric]]
@@ -571,14 +581,21 @@ description = "Protein that stores iron; reflects the body's iron stores."
 canonical_name = "Vitamin D (25-OH)"
 category = "Vitamins"
 canonical_unit = "ng/mL"
-aliases = ["Vitamin D", "Vitamin D Total", "25-OH Vitamin D", "25(OH) Vitamin D", "25-Hydroxy Vitamin D"]
+aliases = [
+    "Vitamin D",
+    "Vitamin D Total",
+    "25-OH Vitamin D",
+    "25(OH) Vitamin D",
+    "25-Hydroxy Vitamin D",
+    "25-OH, Vitamin D",
+]
 description = "Main circulating form of vitamin D, important for bones and calcium balance."
 
 [[metric]]
 canonical_name = "Vitamin B12"
 category = "Vitamins"
 canonical_unit = "pg/mL"
-aliases = ["B12", "Cobalamin", "Cyanocobalamin"]
+aliases = ["B12", "Cobalamin", "Cyanocobalamin", "Vitamin - B12", "Vitamin B-12"]
 description = "Vitamin needed for nerve function and making red blood cells."
 
 [[metric]]

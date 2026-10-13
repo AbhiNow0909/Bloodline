@@ -63,6 +63,105 @@ SYNTHETIC_LLM_REPLY: dict[str, Any] = {
 }
 
 
+# A real gpt-oss-20b reply for the synthetic MediBuddy-style report
+# (`tests/synthetic_medibuddy.py`), kept verbatim: the model carries a panel heading over to the
+# next section's tests and keeps the accreditation mark ("*") in names.
+SYNTHETIC_MEDIBUDDY_LLM_REPLY: dict[str, Any] = {
+    "tests": [
+        {
+            "raw_name": "Protein Total",
+            "panel": "Liver Function Profile",
+            "technology": None,
+            "value": "7.2",
+            "unit": "g/dL",
+            "reference_ranges": [{"label": None, "text": "6.4 - 8.3"}],
+            "method": "Biuret",
+            "sample_type": "SERUM",
+        },
+        {
+            "raw_name": "Bilirubin Direct",
+            "panel": "Liver Function Profile",
+            "technology": None,
+            "value": "0.21",
+            "unit": "mg/dL",
+            "reference_ranges": [{"label": None, "text": "Upto 0.25"}],
+            "method": "Diazo method",
+            "sample_type": "SERUM",
+        },
+        {
+            "raw_name": "Aspartate Aminotransferase(AST/SGOT)",
+            "panel": "Liver Function Profile",
+            "technology": None,
+            "value": "46",
+            "unit": "U/L",
+            "reference_ranges": [{"label": None, "text": "Upto 40"}],
+            "method": "IFCC without P5P",
+            "sample_type": "SERUM",
+        },
+        {
+            "raw_name": "Vitamin - B12*",
+            "panel": "Liver Function Profile",
+            "technology": None,
+            "value": "345",
+            "unit": "pg/mL",
+            "reference_ranges": [{"label": None, "text": "211 - 911"}],
+            "method": "CLIA",
+            "sample_type": "SERUM",
+        },
+        {
+            "raw_name": "Hemoglobin (Hb)*",
+            "panel": "Complete Blood Count (CBC)",
+            "technology": None,
+            "value": "13.9",
+            "unit": "g/dL",
+            "reference_ranges": [{"label": None, "text": "13.0 - 17.0"}],
+            "method": "Photometry",
+            "sample_type": "WB EDTA",
+        },
+        {
+            "raw_name": "RBC Count",
+            "panel": "Complete Blood Count (CBC)",
+            "technology": None,
+            "value": "4.82",
+            "unit": "mil/µL",
+            "reference_ranges": [{"label": None, "text": "4.5 - 5.5"}],
+            "method": "Electrical impedance",
+            "sample_type": "WB EDTA",
+        },
+        {
+            "raw_name": "Total Leucocyte Count (WBC)",
+            "panel": "Complete Blood Count (CBC)",
+            "technology": None,
+            "value": "6500",
+            "unit": "cells/Cumm",
+            "reference_ranges": [{"label": None, "text": "4000 - 10000"}],
+            "method": None,
+            "sample_type": "WB EDTA",
+        },
+        {
+            "raw_name": "Absolute Neutrophil Count",
+            "panel": "Complete Blood Count (CBC)",
+            "technology": None,
+            "value": "3.90",
+            "unit": "* 10^9/L",
+            "reference_ranges": [{"label": None, "text": "2.0 - 7.0"}],
+            "method": "Calculated",
+            "sample_type": "WB EDTA",
+        },
+        {
+            "raw_name": "RBC Morphology",
+            "panel": "Complete Blood Count (CBC)",
+            "technology": None,
+            "value": "Normocytic Normochromic",
+            "unit": None,
+            "reference_ranges": [],
+            "method": None,
+            "sample_type": "WB EDTA",
+        },
+    ]
+}
+
+
 def seed_metric_index() -> MetricIndex:
     """The real metric dictionary (from the seed file) without a database."""
     return MetricIndex(

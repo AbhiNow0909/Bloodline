@@ -1,8 +1,10 @@
 """PDF bytes → scrubbed, LLM-safe report text plus locally parsed header fields."""
 
+import re
+
 from app.models import Sex
-from app.services.extraction.header import ParsedHeader, parse_header
-from app.services.extraction.layout import PageKind, classify_page, split_results_page
+from app.services.extraction.header import ParsedHeader, parse_header, parse_medibuddy_header
+from app.services.extraction.layout import Layout, PageKind, classify_page, split_results_page
 from app.services.extraction.pdf_text import read_page_texts
 from app.services.extraction.pii import find_leaks, scrub_text
 from app.services.extraction.schemas import (
@@ -26,6 +28,20 @@ def _single[T](values: list[T | None], what: str, warnings: list[str]) -> T | No
         warnings.append(f"Results pages show different {what}")
         return None
     return distinct[0] if distinct else None
+
+
+_HEADER_PARSERS = {Layout.THYROCARE: parse_header, Layout.MEDIBUDDY: parse_medibuddy_header}
+# MediBuddy reports name the lab in a footer note on each results page.
+_PROCESSED_AT = re.compile(r"^NOTE\s*:.*?\bprocessed at\s+(?P<lab>.+?)\s+Lab\b", re.MULTILINE)
+
+
+def _lab_name(texts: list[str], layouts: set[Layout]) -> str | None:
+    if Layout.THYROCARE in layouts and any("thyrocare" in t.lower() for t in texts):
+        return "Thyrocare"
+    if Layout.MEDIBUDDY in layouts:
+        labs = _unique([m["lab"] for t in texts if (m := _PROCESSED_AT.search(t))])
+        return labs[0] if len(labs) == 1 else None
+    return None
 
 
 def _skipped_pictures_warning(numbers: list[int]) -> str:
@@ -54,15 +70,19 @@ def extract_report(pdf_bytes: bytes) -> ExtractedReport:
         raise NoTextLayerError("scanned/image PDF not supported yet")
     if not results:
         raise UnsupportedLayoutError(
-            "No results pages found. Only Thyrocare-style reports are supported so far."
+            "No results pages found. Only Thyrocare and MediBuddy reports are supported so far."
         )
 
     parts = {i: split_results_page(texts[i]) for i in results}
-    headers: dict[int, ParsedHeader] = {i: parse_header(parts[i].header) for i in results}
+    headers: dict[int, ParsedHeader] = {
+        i: _HEADER_PARSERS[parts[i].layout](parts[i].header) for i in results
+    }
     identity = PrintedIdentity(
         names=_unique([h.name for h in headers.values()]),
         referred_by=_unique([h.referred_by for h in headers.values()]),
-        barcodes=_unique([h.barcode for h in headers.values()]),
+        barcodes=_unique(
+            [h.barcode for h in headers.values()] + [h.client_id for h in headers.values()]
+        ),
     )
 
     warnings = [w for h in headers.values() for w in h.warnings]
@@ -92,7 +112,7 @@ def extract_report(pdf_bytes: bytes) -> ExtractedReport:
 
     collection_times = [p.collected_at for p in pages if p.collected_at is not None]
     return ExtractedReport(
-        lab_name="Thyrocare" if any("thyrocare" in t.lower() for t in texts) else None,
+        lab_name=_lab_name(texts, {parts[i].layout for i in results}),
         collected_at=min(collection_times, default=None),
         printed_age_years=age,
         printed_sex=sex,

@@ -78,13 +78,23 @@ def _audience(label: str | None) -> Sex | str | None:
     return None
 
 
+def oriented(line: RangeLine) -> RangeLine:
+    """Some labs print the interval before the colon ("<200: Desirable", "5 - 40:"), so the
+    interval is copied as the label. Put it back in the text."""
+    if line.label and parse_bounds(line.label) and not parse_bounds(line.text):
+        return RangeLine(label=line.text.strip() or None, text=line.label)
+    return line
+
+
 def select_range(lines: list[RangeLine], sex: Sex) -> SelectedRange | None:
     """The range for this patient: a line for their sex, else the single general line.
 
     Returns None when nothing fits unambiguously (several candidates, only subgroup ranges
-    such as children or age bands, or nothing parseable); the row is then flagged 'unknown'
-    and the printed text is shown for review.
+    such as children or age bands, category ranges such as "Desirable" / "Borderline", or
+    nothing parseable); the row is then flagged 'unknown' and the printed text is shown for
+    review.
     """
+    lines = [oriented(line) for line in lines]
     parsed = [(line, _audience(line.label), parse_bounds(line.text)) for line in lines]
     for wanted in (sex, "general"):
         matches = [(line, bounds) for line, who, bounds in parsed if who == wanted and bounds]

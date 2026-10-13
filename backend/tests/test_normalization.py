@@ -19,6 +19,7 @@ from app.services.normalization import (
     select_range,
     unit_key,
 )
+from app.services.normalization.ranges import SelectedRange, oriented
 from tests.structuring_data import seed_metric_index
 
 
@@ -167,6 +168,28 @@ def test_flags(value: Decimal | None, bounds: Bounds | None, flag: str) -> None:
     assert compute_flag(value, bounds) == flag
 
 
+def test_an_interval_printed_before_the_colon_is_read_as_the_range() -> None:
+    # MediBuddy prints "5 - 40:" and "<200: Desirable"; the model copies the interval as label.
+    assert select_range([RangeLine(label="5 - 40", text="")], "male") == SelectedRange(
+        Bounds(D("5"), D("40")), None
+    )
+    cholesterol = [
+        RangeLine(label="<200", text="Desirable"),
+        RangeLine(label="200-239", text="Borderline risk"),
+        RangeLine(label=">240", text="High risk"),
+    ]
+    assert oriented(cholesterol[0]) == RangeLine(label="Desirable", text="<200")
+    # One "Desirable" line is the range, as when printed "Desirable: <200".
+    assert select_range(cholesterol, "male") == SelectedRange(Bounds(None, D("200")), "Desirable")
+    hdl = [
+        RangeLine(label="< 40", text="Low"),
+        RangeLine(label="40 - 60", text="Optimal"),
+        RangeLine(label="> 60", text="Desirable"),
+    ]
+    assert select_range(hdl, "male") is None  # two "good" categories: chosen in review
+    assert oriented(RangeLine(label="Male", text="39 - 259")) == RangeLine("Male", "39 - 259")
+
+
 # --- units ---------------------------------------------------------------------------------
 
 
@@ -180,6 +203,9 @@ def test_flags(value: Decimal | None, bounds: Bounds | None, flag: str) -> None:
         ("Lakhs/cumm", "10^5/ul"),
         ("mcg/dL", "ug/dl"),
         ("mg/dl", "mg/dl"),
+        ("* 10^9/L", "10^9/l"),  # MediBuddy
+        ("cells/Cumm", "10^0/ul"),
+        ("mil/µL", "10^6/ul"),
     ],
 )
 def test_unit_keys(unit: str, key: str) -> None:
@@ -196,6 +222,9 @@ def test_unit_keys(unit: str, key: str) -> None:
         ("2.5", "µIU/mL", "mIU/L", "2.5"),
         ("2.5", "Lakhs/cumm", "10^3/uL", "250"),
         ("7.2", "X 10³ / µL", "10^9/L", "7.2"),
+        ("2.65", "* 10^9/L", "10^3/uL", "2.65"),
+        ("6500", "cells/Cumm", "10^3/uL", "6.500"),
+        ("4.82", "mil/µL", "10^6/uL", "4.82"),
         ("140", "mEq/L", "mmol/L", None),  # equivalents vs moles depend on the ion
         ("90", "mg/dL", "mmol/L", None),  # depends on the analyte: never guessed
         ("12", "fL", "pg", None),

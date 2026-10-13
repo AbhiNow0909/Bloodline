@@ -25,7 +25,9 @@ Mum's HbA1c changed over the last two years?"* or *"Who in the family has high L
 
 - **Families**: group family members into families you create. Only you can see your
   families, their members and everything under them.
-- **PDF ingestion**: reads the text layer of digitally generated lab PDFs (no OCR).
+- **PDF ingestion**: reads the text layer of digitally generated lab PDFs (no OCR). Two
+  report layouts are known: Thyrocare, and reports issued through MediBuddy by partner labs
+  (e.g. HealthMap Diagnostics).
 - **Privacy-first structuring**: names, addresses, phone numbers, barcodes and doctor
   names are removed locally before any text goes to an LLM.
 - **Structuring you can check**: an LLM (`gpt-oss-20b` on Groq, strict JSON output) only
@@ -250,6 +252,14 @@ Processing needs `GROQ_API_KEY`; without it, uploads end as `failed` with that r
 confirm, every number (value, canonical unit, flag) is recomputed on the server from the
 reviewed text and range.
 
+- **Layouts**: a results page is recognised by its table heading: Thyrocare's
+  "TEST NAME TECHNOLOGY VALUE UNITS", or MediBuddy's "TEST DESCRIPTION RESULT UNITS
+  BIOLOGICAL REFERENCE INTERVAL". Each layout has its own header parser (identity, sample,
+  dates; MediBuddy prints day-first dates such as "13/07/26, 04:33 PM") and footer: the
+  general "Interpretation:" paragraphs, the lab note and "Page N of M" are not sent to the AI.
+  The lab name comes from Thyrocare's text or MediBuddy's "processed at … Lab" note. Other
+  layouts fail with "No results pages found".
+
 - **Pages without text** (pictures): one after the last results page, such as a back cover,
   is skipped, and the review says so ("Page 26 has no text (a picture) and was skipped…").
   Anywhere else, or in a report with no text at all, the report fails ("scanned/image PDF
@@ -264,6 +274,18 @@ reviewed text and range.
   it would have set to null (`json_validate_failed`). That reply is taken from Groq's error
   and checked by our own models instead, where a missing optional field counts as null and
   anything else wrong still fails.
+- **The model now and then declines or breaks a reply** ("I'm sorry, but I can't help with
+  that", or JSON in a broken shape), and not the same way twice. A part like that is asked
+  for again; if it still fails, its pages are read one at a time; a page that still fails is
+  left out and the review says so first ("The AI could not read page 2 of the PDF… Add them
+  from the PDF with *Add a test that was missed*"). A part over the per-minute limit (413) is
+  also read page by page.
+- **Daily limit**: Groq's free tier also allows `gpt-oss-20b` 200,000 tokens a day (rolling).
+  A 20-page health checkup uses roughly 30,000; a few long reports, or repeated retries, in
+  one day can use it up. When Groq asks for a longer wait than the client allows, the report
+  fails at once with when to try again ("The AI service's free daily limit is used up. Please
+  try again in about 25 minutes.") and can be retried from its page. Chat and explanations
+  use `gpt-oss-120b`, which has its own limits.
 
 ### History and trends
 

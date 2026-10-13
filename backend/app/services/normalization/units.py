@@ -13,7 +13,16 @@ from decimal import Decimal
 
 _MICRO = str.maketrans({"µ": "u", "μ": "u"})  # MICRO SIGN and GREEK SMALL LETTER MU
 _SUPERSCRIPT_DIGITS = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹", "0123456789")
-_COUNT_WORDS = {"thou": 3, "thousand": 3, "lakh": 5, "lakhs": 5, "mill": 6, "million": 6}
+_COUNT_WORDS = {
+    "cells": 0,
+    "thou": 3,
+    "thousand": 3,
+    "lakh": 5,
+    "lakhs": 5,
+    "mil": 6,
+    "mill": 6,
+    "million": 6,
+}
 
 _PREFIX = {
     "": Decimal(1),
@@ -39,7 +48,7 @@ def unit_key(unit: str) -> str:
     key = re.sub(r"\bof\s+creat(?:inine)?\b", "", key)  # "µg/mg of Creatinine" → "µg/mg"
     key = re.sub(r"\s+", "", key)
     key = key.replace("mcg", "ug").replace("cumm", "ul").replace("mm3", "ul")
-    key = re.sub(r"^x(?=10\^)", "", key)  # "x 10^3/µL"
+    key = re.sub(r"^[x*\u00d7](?=10\^)", "", key)  # "x 10^3/µL", "* 10^9/L", a multiplication sign
     word = re.fullmatch(r"([a-z]+)/(ul|l)", key)
     if word and word[1] in _COUNT_WORDS:
         key = f"10^{_COUNT_WORDS[word[1]]}/{word[2]}"

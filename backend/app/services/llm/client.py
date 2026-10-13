@@ -1,6 +1,7 @@
 """The boundary to LLM providers. Services depend on `ChatClient`; tests replace it."""
 
 import json
+import re
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -27,6 +28,16 @@ class LLMUnavailableError(LLMError):
 
 class LLMRequestError(LLMError):
     """The provider rejected the request (bad key, bad model, invalid input)."""
+
+
+class LLMTooLargeError(LLMRequestError):
+    """The request was larger than the free tier's tokens-per-minute limit (HTTP 413)."""
+
+
+class LLMRefusalError(LLMRequestError):
+    """The model answered without JSON, typically a refusal ("I'm sorry, but I can't help with
+    that"). gpt-oss does this now and then for some combinations of report pages; a smaller
+    request with the same text is usually answered."""
 
 
 class ChatClient(Protocol):
@@ -68,6 +79,31 @@ class AgentClient(Protocol):
 def _is_retryable(exc: Exception) -> bool:
     # 429, 5xx, and network failures/timeouts (APITimeoutError is an APIConnectionError).
     return isinstance(exc, groq.RateLimitError | groq.InternalServerError | groq.APIConnectionError)
+
+
+def _busy_message(exc: groq.RateLimitError) -> str:
+    """When to try again, from Groq's Retry-After; the daily limit is named as such."""
+    wait = _retry_after(exc) or 0
+    body = exc.body if isinstance(exc.body, dict) else {}
+    error = body.get("error", body)
+    daily = "per day" in str(error.get("message", "")) if isinstance(error, dict) else False
+    what = "The AI service's free daily limit is used up" if daily else "The AI service is busy"
+    if wait <= 90:
+        return f"{what}. Please try again in a minute."
+    minutes = round(wait / 60)
+    if minutes < 120:
+        return f"{what}. Please try again in about {minutes} minutes."
+    return f"{what}. Please try again in about {round(minutes / 60)} hours."
+
+
+def _size_note(exc: groq.APIStatusError) -> str:
+    """ " (requested 9207 of 8000 tokens a minute)" from Groq's message: counts only."""
+    body = exc.body if isinstance(exc.body, dict) else {}
+    error = body.get("error", body)
+    message = str(error.get("message", "")) if isinstance(error, dict) else ""
+    if match := re.search(r"\((\w+)\): Limit (\d+), (?:Used \d+, )?Requested (\d+)", message):
+        return f" (requested {match[3]} of {match[2]} tokens, {match[1]})"
+    return ""
 
 
 def _rejected_generation(exc: LLMRequestError) -> str | None:
@@ -122,14 +158,16 @@ class GroqChatClient:
                 max_delay=self._max_delay,
                 sleep=self._sleep,
             )
-        except (groq.RateLimitError, groq.InternalServerError, groq.APIConnectionError) as exc:
+        except groq.RateLimitError as exc:
+            raise LLMUnavailableError(_busy_message(exc)) from exc
+        except (groq.InternalServerError, groq.APIConnectionError) as exc:
             raise LLMUnavailableError(
                 "The AI service is busy or unreachable. Please try again in a minute."
             ) from exc
         except groq.APIStatusError as exc:
             if exc.status_code == 413:
-                raise LLMRequestError(
-                    "The text was too large for the AI service's free tier (status 413)."
+                raise LLMTooLargeError(
+                    f"The text was too large for the AI service's free tier{_size_note(exc)}."
                 ) from exc
             raise LLMRequestError(
                 f"The AI service rejected the request (status {exc.status_code})."
@@ -169,7 +207,7 @@ class GroqChatClient:
         try:
             json.loads(content)
         except ValueError as exc:
-            raise LLMRequestError("The AI service returned something that is not JSON.") from exc
+            raise LLMRefusalError("The AI service returned something that is not JSON.") from exc
         return content
 
     def complete_with_tools(
