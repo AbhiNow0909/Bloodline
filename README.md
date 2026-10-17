@@ -275,11 +275,27 @@ reviewed text and range.
   and checked by our own models instead, where a missing optional field counts as null and
   anything else wrong still fails.
 - **The model now and then declines or breaks a reply** ("I'm sorry, but I can't help with
-  that", or JSON in a broken shape), and not the same way twice. A part like that is asked
-  for again; if it still fails, its pages are read one at a time; a page that still fails is
-  left out and the review says so first ("The AI could not read page 2 of the PDF… Add them
-  from the PDF with *Add a test that was missed*"). A part over the per-minute limit (413) is
-  also read page by page.
+  that", or JSON in a broken shape), and not the same way twice. A part of several pages
+  that fails is read page by page; each page is tried with low reasoning effort, then medium
+  (which reads pages that low declines, at about three times the tokens); a page that still
+  fails is left out and the review says so first ("The AI could not read page 2 of the PDF…
+  Add them from the PDF with *Add a test that was missed*").
+- **Groq's "request too large" (413)** is not always about the request: it also comes when
+  the current minute is nearly spent, with a "retry after N seconds". That wait is taken
+  once; a second 413 counts like a declined part or page.
+- **Skipped rows**: the model sometimes leaves out a test. Where a lab prints the range on
+  the result's own line (MediBuddy), any line shaped like a result ("P-LCR 33.5 % 13 - 43")
+  that no returned row accounts for is named in a review warning ("Page 3 may have results
+  that were not read: Platelet large cell ratio (P-LCR)…").
+- **Cleaning what the model copied**: a unit copied into the value as well ("2.65 X 10³ /
+  µL") is taken off; `gm/dL` is `g/dL`. A test name is not matched to a dictionary test when
+  one is a percentage and the other a cell count (Thyrocare prints both "Nucleated Red Blood
+  Cells %" and an absolute "Nucleated Red Blood Cells").
+- **Ranges printed in other ways** are read too: interval before the label ("<200:
+  Desirable", "5 - 40:"), no colon ("Normal 70 to 100 mg/dl"), a doubled colon ("Normal ::
+  < 4.00"), "> = 90". A single "good" category (Normal, Desirable, Optimal, Sufficiency,
+  Non-Diabetic) is the range; several good categories, subgroups (smokers, age bands) or risk
+  bands stay for the reviewer to choose.
 - **Daily limit**: Groq's free tier also allows `gpt-oss-20b` 200,000 tokens a day (rolling).
   A 20-page health checkup uses roughly 30,000; a few long reports, or repeated retries, in
   one day can use it up. When Groq asks for a longer wait than the client allows, the report

@@ -4,6 +4,7 @@ Uses the synthetic fixture (`tests/synthetic_medibuddy.py`) and a recorded real 
 for it; no network calls are made.
 """
 
+import copy
 from contextlib import nullcontext
 from datetime import datetime
 from decimal import Decimal
@@ -182,6 +183,37 @@ def test_recorded_reply_becomes_reviewable_rows() -> None:
     )
     # Every value and name was found in the text; only the unmapped text result is flagged.
     assert [m.warnings for m in result.metrics[:-1]] == [()] * 8
+
+
+def test_a_row_the_model_skipped_is_named_in_a_review_warning() -> None:
+    reply = copy.deepcopy(SYNTHETIC_MEDIBUDDY_LLM_REPLY)
+    reply["tests"] = [t for t in reply["tests"] if t["raw_name"] != "RBC Count"]
+
+    result = structure_report(
+        REPORT,
+        patient_sex="male",
+        metric_index=seed_metric_index(),
+        client=FakeChatClient(reply),
+        model="m",
+    )
+
+    assert "RBC Count" not in [m.raw_name for m in result.metrics]
+    assert result.warnings == (
+        "Page 2 may have results that were not read: RBC Count. Check them against the PDF "
+        'and add any that are missing with "Add a test that was missed".',
+    )
+
+
+def test_nothing_is_reported_missing_when_every_row_was_read() -> None:
+    result = structure_report(
+        REPORT,
+        patient_sex="male",
+        metric_index=seed_metric_index(),
+        client=FakeChatClient(SYNTHETIC_MEDIBUDDY_LLM_REPLY),
+        model="m",
+    )
+
+    assert result.warnings == ()
 
 
 # --- upload, over HTTP -----------------------------------------------------------------------

@@ -13,7 +13,7 @@ from pydantic import ValidationError
 from app.models import Sex
 from app.services.extraction import ExtractedReport, PiiLeakError
 from app.services.extraction.pii import find_leaks
-from app.services.llm import ChatClient, LLMRefusalError, LLMTooLargeError
+from app.services.llm import ChatClient, Effort, LLMRefusalError, LLMTooLargeError
 from app.services.normalization import (
     MetricIndex,
     RangeLine,
@@ -22,6 +22,7 @@ from app.services.normalization import (
     parse_number,
     select_range,
 )
+from app.services.structuring.completeness import possibly_missed
 from app.services.structuring.prompt import SYSTEM_PROMPT
 from app.services.structuring.schemas import (
     LLM_REPORT_SCHEMA,
@@ -50,6 +51,16 @@ def _clean_name(raw_name: str, technology: str | None) -> str:
     return name
 
 
+def _without_unit(value: str, unit: str | None) -> str:
+    """The model sometimes copies the unit into the value too ("2.65 X 10³ / µL")."""
+    value = " ".join(value.split())
+    if unit and unit.strip():
+        unit = " ".join(unit.split())
+        if value.casefold().endswith(" " + unit.casefold()):
+            return value[: -len(unit)].rstrip()
+    return value
+
+
 def normalize_test(
     test: LlmTest, *, sex: Sex, metric_index: MetricIndex, source_text: str
 ) -> StructuredMetric:
@@ -61,13 +72,14 @@ def normalize_test(
     if _squash(raw_name) not in source:
         warnings.append(NAME_NOT_IN_SOURCE)
 
-    value = parse_number(test.value)
+    printed_value = _without_unit(test.value, test.unit)
+    value = parse_number(printed_value)
     ranges = [RangeLine(label=r.label, text=r.text) for r in test.reference_ranges]
     chosen = select_range(ranges, sex)
     if ranges and chosen is None and value is not None:  # qualitative results need no bounds
         warnings.append(NO_RANGE_CHOSEN)
 
-    entry = metric_index.match(raw_name, test.sample_type)
+    entry = metric_index.match(raw_name, test.sample_type, test.unit)
     value_canonical = unit_canonical = None
     if entry is None:
         warnings.append(UNKNOWN_TEST)
@@ -86,7 +98,7 @@ def normalize_test(
         technology=test.technology,
         method=test.method,
         sample_type=test.sample_type,
-        value_text=test.value,
+        value_text=printed_value,
         value_numeric=value,
         unit=test.unit,
         canonical_metric_id=entry.id if entry else None,
@@ -141,6 +153,14 @@ def report_parts(report: ExtractedReport) -> list[ReportPart]:
     return parts
 
 
+def possibly_missed_warning(page_number: int, names: list[str]) -> str:
+    shown = ", ".join(names[:5]) + (f" and {len(names) - 5} more" if len(names) > 5 else "")
+    return (
+        f"Page {page_number} may have results that were not read: {shown}. Check them against "
+        'the PDF and add any that are missing with "Add a test that was missed".'
+    )
+
+
 def unread_page_warning(page_number: int) -> str:
     return (
         f"The AI could not read page {page_number} of the PDF, so its results are not listed "
@@ -155,6 +175,7 @@ def _structure_part(
     metric_index: MetricIndex,
     client: ChatClient,
     model: str,
+    effort: Effort,
 ) -> list[StructuredMetric]:
     reply = client.complete_json(
         model=model,
@@ -162,6 +183,7 @@ def _structure_part(
         user=text,
         schema_name="lab_report",
         schema=LLM_REPORT_SCHEMA,
+        effort=effort,
     )
     try:
         parsed = LlmReport.model_validate_json(reply)
@@ -174,10 +196,11 @@ def _structure_part(
     ]
 
 
-# A reply the model declined or broke (see `structure_report`) is asked for again this many
-# times in all before the text is split or left out. Groq's output varies between identical
-# requests, so a second try usually succeeds.
-ATTEMPTS = 2
+# How each request is tried (see `structure_report`): a part of several pages once, cheaply,
+# before it is split into pages; a single page cheaply, then with more reasoning, which reads
+# pages that the cheap setting declines or breaks (at about three times the tokens).
+PART_EFFORTS: tuple[Effort, ...] = ("low",)
+PAGE_EFFORTS: tuple[Effort, ...] = ("low", "medium")
 
 
 def structure_report(
@@ -191,12 +214,12 @@ def structure_report(
     """Only `report.llm_text()` (scrubbed results) is ever sent to the LLM, in parts of whole
     pages when it is large (`MAX_PART_CHARS`).
 
-    gpt-oss now and then declines a request ("I'm sorry, but I can't help with that") or
-    returns JSON in a broken shape, and not the same way twice. Such a part is asked for again;
-    if it still fails, its pages are read one at a time, and a page that still fails is left out
+    gpt-oss now and then declines a request ("I'm sorry, but I can't help with that"), returns
+    JSON in a broken shape, or Groq finds the request too large for the free tier's minute;
+    not the same way twice. A part of several pages that fails is read one page at a time; a
+    page is tried with low reasoning effort, then medium; a page that still fails is left out
     with a review warning, so the person adds those results from the PDF (the review shows it
-    alongside). A part too large for the free tier's per-minute limit is also read page by
-    page. Any other error (service busy, request rejected) fails the whole report."""
+    alongside). Any other error (service busy, request rejected) fails the whole report."""
     parts = report_parts(report)
     for part in parts:  # second check, right at the LLM boundary, before anything is sent
         if leaks := find_leaks(part.text, report.identity):
@@ -209,34 +232,34 @@ def structure_report(
         model=model,
     )
 
-    def attempt(text: str) -> list[StructuredMetric] | None:
-        for _ in range(ATTEMPTS):
+    def attempt(part: ReportPart) -> list[StructuredMetric] | None:
+        for effort in PAGE_EFFORTS if len(part.pages) == 1 else PART_EFFORTS:
             try:
-                return structure(text)
-            except (LLMRefusalError, StructuringError):
+                return structure(part.text, effort=effort)
+            except (LLMRefusalError, LLMTooLargeError, StructuringError):
                 continue
         return None
 
     metrics: list[StructuredMetric] = []
     warnings: list[str] = []
+    read: list[ReportPart] = []
     pending = list(parts)
     while pending:
         part = pending.pop(0)
-        try:
-            rows = attempt(part.text)
-        except LLMTooLargeError:
-            if len(part.pages) == 1:
-                raise
-            pending[:0] = part.single_pages()  # smaller requests fit
-            continue
+        rows = attempt(part)
         if rows is not None:
             metrics += rows
+            read.append(part)
         elif len(part.pages) > 1:
             pending[:0] = part.single_pages()
         else:
             warnings.append(unread_page_warning(part.page_numbers[0]))
     if not metrics and warnings:  # no page could be read
         raise StructuringError("The AI could not read this report. Please try again later.")
+    for part in read:
+        for number, page in zip(part.page_numbers, part.pages, strict=True):
+            if names := possibly_missed(page, metrics):
+                warnings.append(possibly_missed_warning(number, names))
     if not metrics:
         warnings.append("No test results were found in the report.")
     return StructuredReport(model=model, metrics=tuple(metrics), warnings=tuple(warnings))

@@ -85,7 +85,20 @@ def test_request_uses_strict_json_schema_and_deterministic_settings(
     assert sent["response_format"]["type"] == "json_schema"
     assert sent["response_format"]["json_schema"]["strict"] is True
     assert (sent["temperature"], sent["reasoning_format"]) == (0, "hidden")
+    assert sent["reasoning_effort"] == "low"
     assert sent["max_completion_tokens"] == 16_384
+
+
+def test_more_reasoning_can_be_asked_for(
+    monkeypatch: pytest.MonkeyPatch, sleeps: list[float]
+) -> None:
+    fake = FakeCreate('{"tests": []}')
+
+    make_client(monkeypatch, fake, sleeps).complete_json(
+        model="m", system="s", user="t", schema_name="n", schema={}, effort="medium"
+    )
+
+    assert fake.calls[0]["reasoning_effort"] == "medium"
 
 
 @pytest.mark.parametrize(
@@ -455,3 +468,43 @@ def test_other_rejections_are_still_errors(
 ) -> None:
     with pytest.raises(LLMRequestError, match=message):
         complete(make_client(monkeypatch, FakeCreate(error), sleeps))
+
+
+def too_large(retry_after: str | None) -> groq.APIStatusError:
+    """Groq's 413 for a request over the minute's token limit, with or without a wait."""
+    headers = {"retry-after": retry_after} if retry_after else None
+    message = "Request too large ... on tokens per minute (TPM): Limit 8000, Requested 8212"
+    return groq.APIStatusError(
+        "error",
+        response=httpx.Response(413, headers=headers, request=REQUEST),
+        body={"error": {"message": message, "code": "rate_limit_exceeded"}},
+    )
+
+
+def test_a_too_large_answer_with_a_wait_is_tried_once_more(
+    monkeypatch: pytest.MonkeyPatch, sleeps: list[float]
+) -> None:
+    fake = FakeCreate(too_large("15"), "{}")
+
+    assert complete(make_client(monkeypatch, fake, sleeps)) == "{}"
+    assert (len(fake.calls), sleeps) == (2, [15.0])
+
+
+def test_a_second_too_large_answer_is_final(
+    monkeypatch: pytest.MonkeyPatch, sleeps: list[float]
+) -> None:
+    fake = FakeCreate(too_large("15"), too_large("15"))
+
+    with pytest.raises(LLMTooLargeError, match="requested 8212 of 8000 tokens"):
+        complete(make_client(monkeypatch, fake, sleeps))
+    assert (len(fake.calls), sleeps) == (2, [15.0])
+
+
+def test_a_too_large_answer_with_a_long_wait_is_final_at_once(
+    monkeypatch: pytest.MonkeyPatch, sleeps: list[float]
+) -> None:
+    fake = FakeCreate(too_large("38"))  # longer than this client waits (20 s)
+
+    with pytest.raises(LLMTooLargeError):
+        complete(make_client(monkeypatch, fake, sleeps))
+    assert (len(fake.calls), sleeps) == (1, [])

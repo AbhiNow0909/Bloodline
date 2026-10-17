@@ -20,6 +20,7 @@ from app.services.normalization import (
     unit_key,
 )
 from app.services.normalization.ranges import SelectedRange, oriented
+from app.services.normalization.units import measures_differently
 from tests.structuring_data import seed_metric_index
 
 
@@ -190,6 +191,54 @@ def test_an_interval_printed_before_the_colon_is_read_as_the_range() -> None:
     assert oriented(RangeLine(label="Male", text="39 - 259")) == RangeLine("Male", "39 - 259")
 
 
+@pytest.mark.parametrize(
+    ("lines", "expected"),
+    [
+        pytest.param(  # Thyrocare, ADA guideline: no colon between label and interval
+            [("", "Normal 70 to 100 mg/dl"), ("", "Prediabetes 100 mg/dl to 125 mg/dl")],
+            (Bounds(D("70"), D("100")), "Normal"),
+            id="label-without-colon",
+        ),
+        pytest.param(
+            [("Normal :", "< 4.00 ng/ml"), ("Border line :", "4.00 to 10.00 ng/ml")],
+            (Bounds(None, D("4.00")), "Normal"),
+            id="doubled-colon",
+        ),
+        pytest.param(
+            [("> = 90", "Normal"), ("60 - 89", "Mild Decrease")],
+            (Bounds(D("90"), None), "Normal"),
+            id="spaced-greater-or-equal",
+        ),
+        pytest.param(
+            [("Deficiency", "<=20 ng/ml"), ("Sufficiency", ">= 30 ng/ml || Toxicity : >100")],
+            (Bounds(D("30"), None), "Sufficiency"),
+            id="vitamin-d-sufficiency",
+        ),
+        pytest.param(
+            [("Non-Diabetic", "<= 5.6"), ("Pre Diabetic", "5.7 - 6.4"), ("Diabetic", ">= 6.5")],
+            (Bounds(None, D("5.6")), "Non-Diabetic"),
+            id="hba1c-non-diabetic",
+        ),
+        pytest.param(
+            [("Non Smokers (Past / Never Smoked) - <3", ""), ("Smokers (current) - <5.5", "")],
+            None,
+            id="subgroups-stay-for-review",
+        ),
+        pytest.param(
+            [("< 0.81", "Low Risk"), ("0.81 - 2.99", "Average Risk")],
+            None,
+            id="risk-bands-stay-for-review",
+        ),
+    ],
+)
+def test_ranges_printed_in_other_ways(
+    lines: list[tuple[str, str]], expected: tuple[Bounds, str] | None
+) -> None:
+    selected = select_range([RangeLine(label or None, text) for label, text in lines], "male")
+
+    assert (None if selected is None else (selected.bounds, selected.label)) == expected
+
+
 # --- units ---------------------------------------------------------------------------------
 
 
@@ -206,6 +255,7 @@ def test_an_interval_printed_before_the_colon_is_read_as_the_range() -> None:
         ("* 10^9/L", "10^9/l"),  # MediBuddy
         ("cells/Cumm", "10^0/ul"),
         ("mil/µL", "10^6/ul"),
+        ("gm/dL", "g/dl"),  # Thyrocare
     ],
 )
 def test_unit_keys(unit: str, key: str) -> None:
@@ -236,6 +286,21 @@ def test_unit_conversion(value: str, source: str | None, target: str, expected: 
     converted = convert(D(value), source, target)
 
     assert (str(converted) if converted is not None else None) == expected
+
+
+@pytest.mark.parametrize(
+    ("unit", "other", "different"),
+    [
+        ("%", "10^3/uL", True),
+        ("X 10³ / µL", "%", True),
+        ("%", "%", False),
+        ("mg/dL", "mmol/L", False),  # analyte-specific: matched, flagged for review instead
+        (None, "%", False),
+        ("fL", "%", False),
+    ],
+)
+def test_measures_differently(unit: str | None, other: str, different: bool) -> None:
+    assert measures_differently(unit, other) is different
 
 
 # --- names ---------------------------------------------------------------------------------

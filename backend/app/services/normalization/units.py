@@ -48,6 +48,7 @@ def unit_key(unit: str) -> str:
     key = re.sub(r"\bof\s+creat(?:inine)?\b", "", key)  # "µg/mg of Creatinine" → "µg/mg"
     key = re.sub(r"\s+", "", key)
     key = key.replace("mcg", "ug").replace("cumm", "ul").replace("mm3", "ul")
+    key = re.sub(r"^gms?/", "g/", key)  # "gm/dL"
     key = re.sub(r"^[x*\u00d7](?=10\^)", "", key)  # "x 10^3/µL", "* 10^9/L", a multiplication sign
     word = re.fullmatch(r"([a-z]+)/(ul|l)", key)
     if word and word[1] in _COUNT_WORDS:
@@ -69,6 +70,23 @@ def _quantity(key: str) -> _Quantity | None:
         base = "u" if match["base"] == "iu" else match["base"]  # IU and U are used alike
         return _Quantity((base, match["per"]), _PREFIX[match["num"]] / _PREFIX[match["den"]])
     return None
+
+
+def measures_differently(unit: str | None, other: str | None) -> bool:
+    """True when one unit is a percentage and the other a cell count ("%" vs "10^3/µL"): the
+    same test name then means a different measurement (e.g. a cell type's share vs its
+    absolute count). Other differences, such as mg/dL vs mmol/L, are not decided here."""
+    if not unit or not other:
+        return False
+    kinds = {_kind(unit_key(unit)), _kind(unit_key(other))}
+    return kinds == {"percent", "count"}
+
+
+def _kind(key: str) -> str | None:
+    if key == "%":
+        return "percent"
+    quantity = _quantity(key)
+    return "count" if quantity is not None and quantity.kind == ("count", "l") else None
 
 
 def convert(value: Decimal, from_unit: str | None, to_unit: str) -> Decimal | None:

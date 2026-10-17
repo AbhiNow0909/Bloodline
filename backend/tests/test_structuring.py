@@ -77,6 +77,7 @@ def test_the_llm_receives_only_the_scrubbed_text() -> None:
         "user": REPORT.llm_text(),
         "schema_name": "lab_report",
         "schema": LLM_REPORT_SCHEMA,
+        "effort": "low",
     }
     everything_sent = json.dumps(call).lower()
     for value in (fake.NAME, fake.REFERRED_BY, fake.URINE_BARCODE, fake.PHONE, fake.EMAIL):
@@ -206,6 +207,48 @@ def test_unknown_tests_are_kept_but_unmapped() -> None:
     assert row.warnings == (UNKNOWN_TEST,)
 
 
+def test_a_unit_copied_into_the_value_is_taken_off() -> None:
+    # Thyrocare prints value and unit side by side; the model sometimes copies both as value.
+    row = normalize_test(
+        _test(raw_name="PLATELET COUNT", technology="HF & EI", value="241 X 10³ / µL",
+              unit="X 10³ / µL", reference_ranges=[{"label": None, "text": "150-410"}]),
+        sex="male",
+        metric_index=INDEX,
+        source_text="PLATELET COUNT HF & EI 241 X 10³ / µL 150-410",
+    )  # fmt: skip
+
+    assert (row.value_text, row.value_numeric) == ("241", D("241"))
+    assert (row.canonical_name, row.value_canonical, row.unit_canonical) == (
+        "Platelet Count",
+        D("241"),
+        "10^3/uL",
+    )
+    assert (row.flag, row.warnings) == ("normal", ())
+
+
+@pytest.mark.parametrize(
+    ("raw_name", "unit", "expected"),
+    [
+        ("Nucleated Red Blood Cells", "X 10³ / µL", None),  # Thyrocare's absolute count
+        ("Nucleated Red Blood Cells %", "%", "Nucleated RBC"),
+        ("Immature Granulocytes (IG)", "X 10³ / µL", None),
+        ("Immature Granulocyte Percentage (IG%)", "%", "Immature Granulocytes"),
+        ("Neutrophils - Absolute Count", "X 10³ / µL", "Absolute Neutrophil Count"),
+    ],
+)
+def test_a_share_and_an_absolute_count_are_different_tests(
+    raw_name: str, unit: str, expected: str | None
+) -> None:
+    row = normalize_test(
+        _test(raw_name=raw_name, value="0.02", unit=unit, technology="Calculated"),
+        sex="male",
+        metric_index=INDEX,
+        source_text=f"{raw_name} 0.02 {unit}",
+    )
+
+    assert row.canonical_name == expected
+
+
 def test_qualitative_results_are_kept_as_text() -> None:
     row = normalize_test(
         _test(raw_name="URINE GLUCOSE", value="Negative", unit=None,
@@ -249,16 +292,23 @@ class PartwiseClient:
     as the model would. Calls numbered in `broken` (1-based) get a reply in a broken shape, and
     a request containing any of `refuse` is declined, as gpt-oss sometimes does."""
 
-    def __init__(self, broken: tuple[int, ...] = (), refuse: tuple[str, ...] = ()) -> None:
+    def __init__(
+        self,
+        broken: tuple[int, ...] = (),
+        refuse: tuple[str, ...] = (),
+        refuse_at: tuple[str, ...] = ("low", "medium"),
+    ) -> None:
         self.calls: list[dict[str, Any]] = []
         self.broken = broken
         self.refuse = refuse
+        self.refuse_at = refuse_at  # the efforts at which `refuse` applies
 
     def complete_json(self, **kwargs: Any) -> str:
         self.calls.append(kwargs)
         if len(self.calls) in self.broken:
             return json.dumps({"tests": [], "panel": "CBC", "value": "4.82"})  # seen from gpt-oss
-        if any(text in kwargs["user"] for text in self.refuse):
+        declined = any(text in kwargs["user"] for text in self.refuse)
+        if declined and kwargs["effort"] in self.refuse_at:
             raise LLMRefusalError("The AI service returned something that is not JSON.")
         tests = [t for t in SYNTHETIC_LLM_REPLY["tests"] if t["value"] in kwargs["user"]]
         return json.dumps({"tests": tests})
@@ -330,7 +380,7 @@ def test_identity_in_any_part_stops_before_anything_is_sent(
     assert client.calls == []  # not even the clean first parts
 
 
-def test_a_broken_reply_is_asked_for_again(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_broken_page_is_read_again_with_more_reasoning(monkeypatch: pytest.MonkeyPatch) -> None:
     whole, _ = structure()
     monkeypatch.setattr(service, "MAX_PART_CHARS", 10)
     client = PartwiseClient(broken=(2,))
@@ -339,7 +389,12 @@ def test_a_broken_reply_is_asked_for_again(monkeypatch: pytest.MonkeyPatch) -> N
         REPORT, patient_sex="female", metric_index=INDEX, client=client, model="test-model"
     )
 
-    assert [call["user"] for call in client.calls] == [PAGES[0], PAGES[1], PAGES[1], PAGES[2]]
+    assert [(call["user"], call["effort"]) for call in client.calls] == [
+        (PAGES[0], "low"),
+        (PAGES[1], "low"),
+        (PAGES[1], "medium"),
+        (PAGES[2], "low"),
+    ]
     assert result == whole
 
 
@@ -382,9 +437,23 @@ def test_a_declined_part_is_read_page_by_page() -> None:
         REPORT, patient_sex="female", metric_index=INDEX, client=client, model="test-model"
     )
 
-    # Asked twice as a whole, then page by page.
-    assert [call["user"] for call in client.calls] == [REPORT.llm_text()] * 2 + PAGES
+    # Asked once as a whole (cheaply), then page by page.
+    assert [call["user"] for call in client.calls] == [REPORT.llm_text(), *PAGES]
+    assert {call["effort"] for call in client.calls} == {"low"}
     assert result == whole  # same rows, same order, no warnings
+
+
+def test_a_page_declined_with_little_reasoning_is_read_with_more() -> None:
+    whole, _ = structure()
+    client = PartwiseClient(refuse=("FERRITIN",), refuse_at=("low",))
+
+    result = structure_report(
+        REPORT, patient_sex="female", metric_index=INDEX, client=client, model="test-model"
+    )
+
+    ferritin = [call["effort"] for call in client.calls if "FERRITIN" in call["user"]]
+    assert ferritin == ["low", "low", "medium"]  # the whole report, then its page twice
+    assert result == whole
 
 
 def test_a_page_still_declined_is_left_out_with_a_review_warning() -> None:
@@ -409,7 +478,7 @@ def test_a_report_the_model_declines_entirely_fails() -> None:
 
     with pytest.raises(StructuringError, match="could not read this report"):
         structure_report(REPORT, patient_sex="female", metric_index=INDEX, client=client, model="m")
-    assert len(client.calls) == 8  # the whole report, then each of its three pages, twice each
+    assert len(client.calls) == 7  # the whole report, then each of its three pages, twice each
 
 
 def test_a_part_too_large_for_the_free_tier_is_read_page_by_page() -> None:
@@ -431,10 +500,12 @@ def test_a_part_too_large_for_the_free_tier_is_read_page_by_page() -> None:
     assert result == whole
 
 
-def test_a_single_page_too_large_fails_the_report(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_page_too_large_even_alone_is_treated_like_a_declined_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(service, "MAX_PART_CHARS", 10)
     client = FakeChatClient(LLMTooLargeError("The text was too large for the AI service."))
 
-    with pytest.raises(LLMTooLargeError):
+    with pytest.raises(StructuringError, match="could not read this report"):
         structure_report(REPORT, patient_sex="female", metric_index=INDEX, client=client, model="m")
-    assert len(client.calls) == 1
+    assert [call["effort"] for call in client.calls] == ["low", "medium"] * 3

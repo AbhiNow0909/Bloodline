@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import CanonicalMetric
+from app.services.normalization.units import measures_differently
 
 
 def name_key(name: str) -> str:
@@ -58,9 +59,14 @@ class MetricIndex:
             for row in rows
         )
 
-    def match(self, raw_name: str, sample_type: str | None = None) -> DictionaryEntry | None:
+    def match(
+        self, raw_name: str, sample_type: str | None = None, unit: str | None = None
+    ) -> DictionaryEntry | None:
+        """The test `raw_name` names. With the printed `unit`, a test measured as a share
+        when the unit is a count (or the other way round) is not a match."""
         for candidate in _candidates(raw_name, sample_type):
-            if entry := self._by_key.get(name_key(candidate)):
+            entry = self._by_key.get(name_key(candidate))
+            if entry and not measures_differently(unit, entry.canonical_unit):
                 return entry
         return None
 

@@ -31,6 +31,10 @@ _GENERAL = {
     "reference interval",
     "desirable",
     "optimal",
+    "sufficiency",
+    "sufficient",
+    "non-diabetic",
+    "non diabetic",
 }
 
 
@@ -55,6 +59,7 @@ class SelectedRange:
 def parse_bounds(text: str) -> Bounds | None:
     """ "39 - 259 mg/dl" → (39, 259); "Less than 30 µg/ml" → (None, 30); "> 5" → (5, None)."""
     normalized = " ".join(text.strip().lower().split())
+    normalized = re.sub(r"([<>])\s+=", r"\1=", normalized)  # "> = 90"
     if match := _BETWEEN.match(normalized):
         low, high = Decimal(match[1]), Decimal(match[2])
         return Bounds(low, high) if low <= high else None
@@ -78,12 +83,27 @@ def _audience(label: str | None) -> Sex | str | None:
     return None
 
 
+# "Normal 70 to 100 mg/dl": a label and an interval printed without a colon between them.
+_LABEL_THEN_INTERVAL = re.compile(
+    r"^(?P<label>[a-z][a-z ()/-]*?)\s*[:-]*\s*"
+    r"(?P<interval>(?:[<>\u2264\u2265]|\d|less\b|more\b|up\s*to\b|upto\b|below\b|above\b).*)$",
+    re.IGNORECASE,
+)
+
+
 def oriented(line: RangeLine) -> RangeLine:
-    """Some labs print the interval before the colon ("<200: Desirable", "5 - 40:"), so the
-    interval is copied as the label. Put it back in the text."""
-    if line.label and parse_bounds(line.label) and not parse_bounds(line.text):
-        return RangeLine(label=line.text.strip() or None, text=line.label)
-    return line
+    """A range line with its label and interval where `select_range` expects them. Labs print
+    "<200: Desirable" and "5 - 40:" (interval before the colon), "Normal 70 to 100" (no colon)
+    and "Normal :: < 4.00" (a doubled colon); the model copies them as printed."""
+    label = (line.label or "").strip(" :") or None
+    text = line.text.strip().lstrip(":").strip()
+    if label and parse_bounds(label) and not parse_bounds(text):
+        return RangeLine(label=text or None, text=label)
+    if label is None and not parse_bounds(text):
+        match = _LABEL_THEN_INTERVAL.match(text)
+        if match and parse_bounds(match["interval"]):
+            return RangeLine(label=match["label"].strip(), text=match["interval"])
+    return RangeLine(label=label, text=text)
 
 
 def select_range(lines: list[RangeLine], sex: Sex) -> SelectedRange | None:

@@ -119,35 +119,35 @@ description = "Share of platelets that are larger than typical."
 canonical_name = "Neutrophils"
 category = "Complete Blood Count"
 canonical_unit = "%"
-aliases = ["Neutrophil"]
+aliases = ["Neutrophil", "Neutrophils Percentage"]
 description = "Share of white blood cells that are neutrophils, the most common type, involved in fighting infection."
 
 [[metric]]
 canonical_name = "Lymphocytes"
 category = "Complete Blood Count"
 canonical_unit = "%"
-aliases = ["Lymphocyte"]
+aliases = ["Lymphocyte", "Lymphocytes Percentage"]
 description = "Share of white blood cells that are lymphocytes, involved in immune responses."
 
 [[metric]]
 canonical_name = "Monocytes"
 category = "Complete Blood Count"
 canonical_unit = "%"
-aliases = ["Monocyte"]
+aliases = ["Monocyte", "Monocytes Percentage"]
 description = "Share of white blood cells that are monocytes, involved in clearing debris and fighting infection."
 
 [[metric]]
 canonical_name = "Eosinophils"
 category = "Complete Blood Count"
 canonical_unit = "%"
-aliases = ["Eosinophil"]
+aliases = ["Eosinophil", "Eosinophils Percentage"]
 description = "Share of white blood cells that are eosinophils, involved in allergic responses and fighting parasites."
 
 [[metric]]
 canonical_name = "Basophils"
 category = "Complete Blood Count"
 canonical_unit = "%"
-aliases = ["Basophil"]
+aliases = ["Basophil", "Basophils Percentage"]
 description = "Share of white blood cells that are basophils, involved in allergic and inflammatory responses."
 
 [[metric]]
@@ -196,7 +196,7 @@ description = "Number of basophils per volume of blood."
 canonical_name = "Nucleated RBC"
 category = "Complete Blood Count"
 canonical_unit = "%"
-aliases = ["NRBC", "Nucleated Red Blood Cells"]
+aliases = ["NRBC", "Nucleated Red Blood Cells", "Nucleated Red Blood Cells %"]
 description = "Immature red blood cells that still have a nucleus, relative to white blood cells."
 
 # ---------------------------------------------------------------------------
@@ -286,21 +286,26 @@ description = "Triglycerides divided by HDL cholesterol."
 canonical_name = "Total Bilirubin"
 category = "Liver Function"
 canonical_unit = "mg/dL"
-aliases = ["Bilirubin - Total", "Bilirubin Total", "Serum Bilirubin"]
+aliases = ["Bilirubin - Total", "Bilirubin Total", "Serum Bilirubin", "Bilirubin (Total)"]
 description = "Pigment produced when red blood cells break down; processed by the liver."
 
 [[metric]]
 canonical_name = "Direct Bilirubin"
 category = "Liver Function"
 canonical_unit = "mg/dL"
-aliases = ["Bilirubin - Direct", "Conjugated Bilirubin", "Bilirubin Direct"]
+aliases = ["Bilirubin - Direct", "Conjugated Bilirubin", "Bilirubin Direct", "Bilirubin (Direct)"]
 description = "Bilirubin that has already been processed (conjugated) by the liver."
 
 [[metric]]
 canonical_name = "Indirect Bilirubin"
 category = "Liver Function"
 canonical_unit = "mg/dL"
-aliases = ["Bilirubin - Indirect", "Unconjugated Bilirubin", "Bilirubin Indirect"]
+aliases = [
+    "Bilirubin - Indirect",
+    "Unconjugated Bilirubin",
+    "Bilirubin Indirect",
+    "Bilirubin (Indirect)",
+]
 description = "Bilirubin not yet processed by the liver."
 
 [[metric]]

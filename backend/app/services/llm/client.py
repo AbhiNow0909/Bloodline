@@ -40,9 +40,21 @@ class LLMRefusalError(LLMRequestError):
     request with the same text is usually answered."""
 
 
+# How hard the model thinks before answering. "medium" reads pages that "low" sometimes
+# declines or breaks, at about three times the tokens (its reasoning counts as output).
+Effort = Literal["low", "medium"]
+
+
 class ChatClient(Protocol):
     def complete_json(
-        self, *, model: str, system: str, user: str, schema_name: str, schema: dict[str, Any]
+        self,
+        *,
+        model: str,
+        system: str,
+        user: str,
+        schema_name: str,
+        schema: dict[str, Any],
+        effort: Effort = "low",
     ) -> str:
         """Return the model's reply: a JSON document that follows `schema`."""
         ...
@@ -148,16 +160,20 @@ class GroqChatClient:
         self._sleep = sleep
 
     def _send[T](self, call: Callable[[], T]) -> T:
-        """Run one API call with our retry policy, mapping failures to LLMError."""
+        """Run one API call with our retry policy, mapping failures to LLMError.
+
+        Groq sometimes answers "request too large" (413) for a request that fits once the
+        current minute's tokens are spent, and says when to try again; that wait is taken
+        once. A 413 without a usable wait, or a second one, is `LLMTooLargeError`."""
         try:
-            return call_with_retries(
-                call,
-                is_retryable=_is_retryable,
-                retry_after=_retry_after,
-                attempts=self._attempts,
-                max_delay=self._max_delay,
-                sleep=self._sleep,
-            )
+            try:
+                return self._with_retries(call)
+            except groq.APIStatusError as exc:
+                wait = _retry_after(exc) if exc.status_code == 413 else None
+                if wait is None or wait > self._max_delay:
+                    raise
+                self._sleep(wait)
+            return self._with_retries(call)
         except groq.RateLimitError as exc:
             raise LLMUnavailableError(_busy_message(exc)) from exc
         except (groq.InternalServerError, groq.APIConnectionError) as exc:
@@ -173,8 +189,25 @@ class GroqChatClient:
                 f"The AI service rejected the request (status {exc.status_code})."
             ) from exc
 
+    def _with_retries[T](self, call: Callable[[], T]) -> T:
+        return call_with_retries(
+            call,
+            is_retryable=_is_retryable,
+            retry_after=_retry_after,
+            attempts=self._attempts,
+            max_delay=self._max_delay,
+            sleep=self._sleep,
+        )
+
     def complete_json(
-        self, *, model: str, system: str, user: str, schema_name: str, schema: dict[str, Any]
+        self,
+        *,
+        model: str,
+        system: str,
+        user: str,
+        schema_name: str,
+        schema: dict[str, Any],
+        effort: Effort = "low",
     ) -> str:
         def call() -> str:
             response = self._client.chat.completions.create(
@@ -189,7 +222,7 @@ class GroqChatClient:
                 },
                 temperature=0,
                 seed=0,
-                reasoning_effort="low",
+                reasoning_effort=effort,
                 reasoning_format="hidden",
                 # Even a large health-checkup report fits; a runaway reply is cut off and then
                 # fails validation instead of running up to the model's 65k-token limit.
