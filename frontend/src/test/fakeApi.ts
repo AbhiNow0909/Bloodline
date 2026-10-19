@@ -413,6 +413,9 @@ export function fakeApi() {
         ? json(200, { access_token: fakeToken(), token_type: 'bearer', expires_in: 3600 })
         : json(401, { detail: 'Invalid email or password' })
     }
+    if (method === 'GET' && path === '/health') {
+      return json(200, { status: 'ok', database: 'ok', version: 'test' })
+    }
     if (call.authorization === null) return json(401, { detail: 'Not authenticated' })
     if (method === 'GET' && path === '/auth/me') return json(200, USER)
 
@@ -582,6 +585,10 @@ export function fakeApi() {
       authorization: headers.get('Authorization'),
     }
     calls.push(call)
+    // A held sign-in waits here until the test releases it (a server waking up).
+    if (signInGate && call.path === '/auth/login') {
+      return signInGate.then(() => respond(call))
+    }
     // A held AI request (chat or explanations) waits here until the test releases it.
     if (chatGate && (call.path.endsWith('/chat') || call.path.endsWith('/explain'))) {
       const reply = chatGate.then(() => respond(call))
@@ -592,6 +599,7 @@ export function fakeApi() {
   })
   vi.stubGlobal('fetch', fetchMock)
 
+  let signInGate: Promise<void> | null = null
   let chatGate: Promise<void> | null = null
   let lastChat: Promise<void> = Promise.resolve()
   function respond(call: Call): Response {
@@ -684,6 +692,17 @@ export function fakeApi() {
       uploadGate = new Promise((resolve) => {
         release = () => {
           uploadGate = null
+          resolve()
+        }
+      })
+      return release
+    },
+    /** Hold sign-ins until the returned function is called. */
+    holdSignIn() {
+      let release = () => {}
+      signInGate = new Promise((resolve) => {
+        release = () => {
+          signInGate = null
           resolve()
         }
       })

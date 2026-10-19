@@ -6,3 +6,4 @@ from pydantic import BaseModel
 class HealthResponse(BaseModel):
     status: Literal["ok", "error"]
     database: Literal["ok", "unreachable"]
+    version: str

@@ -17,6 +17,12 @@ def test_cors_origins_split_on_commas_and_trimmed() -> None:
     assert settings.cors_origin_list == ["http://localhost:5173", "https://bloodline.example"]
 
 
+def test_cors_origins_drop_a_trailing_slash() -> None:
+    settings = Settings(**VALID, cors_origins="https://bloodline.vercel.app/")
+
+    assert settings.cors_origin_list == ["https://bloodline.vercel.app"]
+
+
 @pytest.mark.parametrize("missing", ["DATABASE_URL", "JWT_SECRET"])
 def test_required_settings(monkeypatch: pytest.MonkeyPatch, missing: str) -> None:
     monkeypatch.delenv(missing, raising=False)

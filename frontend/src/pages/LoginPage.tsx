@@ -3,6 +3,7 @@ import { useEffect, useState, type SubmitEvent } from 'react'
 import { Navigate, useLocation } from 'react-router'
 
 import { Button } from '../components/Button'
+import { Icon } from '../components/Icon'
 import { ErrorState } from '../components/States'
 import { TextField } from '../components/TextField'
 import { TubeRack, Wordmark } from '../components/Wordmark'
@@ -15,6 +16,35 @@ const CLOCK_ERROR = new ApiError(
   0,
   "Couldn't start your session. Check that this device's date and time are correct.",
 )
+
+/** A sign-in slower than this is most likely waiting for the server to start. */
+const WAKING_AFTER_MS = 5_000
+
+/**
+ * The server sleeps after a while without visitors (a free hosting plan) and takes about a
+ * minute to start, so the first sign-in can be slow. Says so after a few seconds.
+ */
+function ServerWakingNote() {
+  const [slow, setSlow] = useState(false)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSlow(true)
+    }, WAKING_AFTER_MS)
+    return () => {
+      clearTimeout(timer)
+    }
+  }, [])
+  if (!slow) return null
+  return (
+    <p className="flex items-start gap-2 text-muted">
+      <Icon name="clock" className="mt-1 size-5 shrink-0 motion-safe:animate-pulse" />
+      <span>
+        Bloodline's server sleeps when no one has used it for a while. Waking it up takes about a
+        minute.
+      </span>
+    </p>
+  )
+}
 
 /** Only same-app paths are followed after signing in. */
 function returnPath(state: unknown): string {
@@ -42,6 +72,12 @@ export function LoginPage() {
 
   useEffect(() => {
     document.title = 'Sign in – Bloodline'
+  }, [])
+
+  // Signing in is usually the first request after a quiet spell: wake the server while the
+  // details are being typed.
+  useEffect(() => {
+    api.wake()
   }, [])
 
   // Signed in (now, or already in another tab): continue to where the user was going.
@@ -116,6 +152,7 @@ export function LoginPage() {
             <Button type="submit" disabled={login.isPending} className="w-full">
               {login.isPending ? 'Signing in…' : 'Sign in'}
             </Button>
+            <div role="status">{login.isPending && <ServerWakingNote />}</div>
           </form>
         </div>
         <p className="mt-4 text-sm text-muted">

@@ -197,6 +197,11 @@ export function uploadReport(
 // --- endpoints ------------------------------------------------------------------------------
 
 export const api = {
+  /** Start the server if it is asleep (the free hosting plan stops it when idle). Nothing is
+   * sent but the request itself, and the answer is not needed. */
+  wake: () => {
+    fetch(`${API_BASE_URL}/health`).catch(() => undefined)
+  },
   login: (email: string, password: string) =>
     request<TokenResponse>('/auth/login', { method: 'POST', json: { email, password } }),
   me: () => request<User>('/auth/me'),

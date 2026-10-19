@@ -143,7 +143,8 @@ See `.env.example` for all variables.
 ```bash
 docker compose up --build        # starts `api` (FastAPI) and `db` (Postgres 16 + pgvector)
 curl http://localhost:8000/health
-# {"status":"ok","database":"ok"}  (HTTP 503 with "unreachable" if the DB is down)
+# {"status":"ok","database":"ok","version":"dev"}  (HTTP 503 with "unreachable" if the DB
+#   is down; "version" is the commit a deployed image was built from)
 ```
 
 - API: <http://localhost:8000>, interactive docs at <http://localhost:8000/docs>
@@ -533,6 +534,24 @@ pull request, and on demand:
   Finally it embeds the synthetic report with the model baked into the image, with networking
   turned off, checks that a ferritin question finds the ferritin page, and runs the reindex
   CLI against the CI database.
+
+### Deployment
+
+Neon (database), Render (backend, Docker image from GHCR) and Vercel (frontend), all on free
+tiers, in Singapore. When CI passes on `main`,
+[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) does the following:
+
+1. builds and pushes the backend image;
+2. migrates and seeds Neon with it;
+3. deploys exactly that image on Render through its deploy hook;
+4. waits until `/health` reports the new commit.
+
+Vercel builds the frontend from `frontend/` on every push. The production build carries a
+Content-Security-Policy that allows requests only to the API in `VITE_API_BASE_URL`.
+
+The one-time dashboard setup (Neon, GitHub environment, GHCR visibility, Render, Vercel, the
+first account), rollbacks and troubleshooting are in
+[`docs/deployment.md`](docs/deployment.md).
 
 ## Privacy
 

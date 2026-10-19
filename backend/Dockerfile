@@ -54,6 +54,11 @@ ENV PATH="/app/.venv/bin:$PATH" \
     EMBEDDING_OFFLINE=true \
     HF_HUB_OFFLINE=1
 
+# The commit this image is built from, reported by /health (the deploy workflow waits for it).
+# Last, so a new commit changes only this layer.
+ARG APP_VERSION=dev
+ENV APP_VERSION=$APP_VERSION
+
 USER app
 WORKDIR /app
 

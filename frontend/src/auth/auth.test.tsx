@@ -1,5 +1,5 @@
-import { screen, waitFor } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { act, screen, waitFor } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
 
 import { session } from '../lib/session'
 import { PASSWORD, USER, fakeApi } from '../test/fakeApi'
@@ -20,14 +20,17 @@ describe('signing in', () => {
 
     expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument()
     expect(router.state.location.pathname).toBe('/login')
-    expect(api.calls).toHaveLength(0) // nothing is requested before signing in
+    // Before signing in, only a wake-up call to the server, without a token.
+    expect(api.calls).toEqual([
+      { method: 'GET', path: '/health', body: undefined, authorization: null },
+    ])
 
     await signInWith(user, `  ${USER.email} `, PASSWORD)
 
     expect(await screen.findByRole('heading', { name: 'Rao family' })).toBeInTheDocument()
     expect(router.state.location.pathname).toBe(`/families/${family.id}`)
     expect(session.get()).not.toBeNull()
-    expect(api.calls[0]).toMatchObject({
+    expect(api.calls[1]).toMatchObject({
       method: 'POST',
       path: '/auth/login',
       body: { email: USER.email, password: PASSWORD },
@@ -40,6 +43,28 @@ describe('signing in', () => {
     fakeApi()
     const { user, router } = renderApp('/login')
     await signInWith(user, USER.email, PASSWORD)
+    expect(await screen.findByRole('heading', { name: 'Families' })).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe('/families')
+  })
+
+  it('explains a slow first sign-in while the server wakes up', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const api = fakeApi()
+    const release = api.holdSignIn()
+    const { user, router } = renderApp('/login')
+    await signInWith(user, USER.email, PASSWORD)
+
+    expect(screen.getByRole('button', { name: 'Signing in…' })).toBeDisabled()
+    expect(screen.queryByText(/server sleeps/)).not.toBeInTheDocument()
+    act(() => {
+      vi.advanceTimersByTime(5_000)
+    })
+    expect(screen.getByRole('status')).toHaveTextContent(
+      "Bloodline's server sleeps when no one has used it for a while. Waking it up takes about a " +
+        'minute.',
+    )
+
+    release()
     expect(await screen.findByRole('heading', { name: 'Families' })).toBeInTheDocument()
     expect(router.state.location.pathname).toBe('/families')
   })
@@ -64,7 +89,7 @@ describe('signing in', () => {
     )
     expect(screen.getByLabelText('Password')).toHaveAccessibleDescription('Enter your password.')
     expect(screen.getByLabelText('Email address')).toHaveFocus()
-    expect(api.calls).toHaveLength(0)
+    expect(api.calls.filter((call) => call.path === '/auth/login')).toHaveLength(0)
   })
 
   it('can show the password while typing it', async () => {

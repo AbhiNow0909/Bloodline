@@ -1,0 +1,142 @@
+name: Deploy
+
+# After CI passes on main (or when started by hand): build the backend image, push it to GHCR,
+# migrate the production database with that image, deploy exactly that image on Render, and
+# wait until /health reports the new commit. The frontend is deployed by Vercel's own Git
+# integration. Setup steps for Neon, Render, Vercel and GitHub: docs/deployment.md.
+# Started by hand, it deploys the current main without waiting for CI.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One deploy at a time; a deploy that has started is never cancelled half way.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy the backend
+    # Only CI runs started by a push to this repository's main branch: workflow_run also fires
+    # for pull requests, including ones from forks whose branch happens to be called main, and
+    # this job has the production secrets.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment:
+      name: production
+      url: ${{ vars.API_URL }}
+    permissions:
+      contents: read
+      packages: write
+    env:
+      # The commit CI tested, not whatever main points to by now.
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+      # Until Render is set up (first-time setup), the image is pushed and the database migrated
+      # but nothing is deployed. Secrets cannot be used in a step's `if`; this flag can.
+      DEPLOY_TO_RENDER: ${{ secrets.RENDER_DEPLOY_HOOK_URL != '' && vars.API_URL != '' }}
+    steps:
+      - name: Check the deploy settings
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::The production environment needs the DATABASE_URL secret (Neon). See docs/deployment.md."
+            exit 1
+          fi
+          if [ "$DEPLOY_TO_RENDER" != "true" ]; then
+            echo "::notice::RENDER_DEPLOY_HOOK_URL or API_URL is not set yet: the image will be pushed and the database migrated, but nothing is deployed (first-time setup, docs/deployment.md)."
+          fi
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.SHA }}
+          persist-credentials: false
+
+      - name: Name the image
+        # GHCR image names must be lower case; the owner's name may not be.
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/bloodline-api" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push the image
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: backend
+          push: true
+          build-args: APP_VERSION=${{ env.SHA }}
+          tags: |
+            ${{ env.IMAGE }}:${{ env.SHA }}
+            ${{ env.IMAGE }}:latest
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ env.SHA }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Record the image digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: echo "IMAGE_REF=$IMAGE@$DIGEST" >> "$GITHUB_ENV"
+
+      - name: Migrate and seed the production database
+        # With the image about to be deployed, before Render switches to it: a failed migration
+        # stops the deploy and the running version keeps serving. Render's free tier has no
+        # pre-deploy command, so this cannot run there.
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          # The app's settings require a JWT secret; migrations never use it.
+          JWT_SECRET="$(openssl rand -hex 32)"
+          echo "::add-mask::$JWT_SECRET"
+          export JWT_SECRET
+          docker run --rm --env DATABASE_URL --env JWT_SECRET "$IMAGE_REF" alembic upgrade head
+          docker run --rm --env DATABASE_URL --env JWT_SECRET "$IMAGE_REF" python -m app.cli.seed
+
+      - name: Deploy the image on Render
+        if: env.DEPLOY_TO_RENDER == 'true'
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        # imgURL makes Render deploy exactly this build (by digest), not whatever :latest is.
+        run: |
+          curl --silent --show-error --fail --get "$RENDER_DEPLOY_HOOK_URL" \
+            --data-urlencode "imgURL=$IMAGE_REF" --output /dev/null
+          echo "Render is deploying $IMAGE_REF"
+
+      - name: Wait until the new version answers
+        if: env.DEPLOY_TO_RENDER == 'true'
+        env:
+          API_URL: ${{ vars.API_URL }}
+        # Render pulls the image and swaps instances only once the new one is healthy; a free
+        # instance may also be waking up. 90 checks, 10 s apart: up to 15 minutes.
+        run: |
+          for _ in $(seq 1 90); do
+            body="$(curl --silent --max-time 30 "$API_URL/health" || true)"
+            case "$body" in
+              *"\"version\":\"$SHA\""*)
+                echo "$API_URL is running $SHA"
+                exit 0
+                ;;
+            esac
+            sleep 10
+          done
+          echo "::error::$API_URL/health did not report $SHA within 15 minutes (last answer: ${body:-none}). Check the deploy in the Render dashboard."
+          exit 1

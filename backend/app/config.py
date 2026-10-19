@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     )
 
     database_url: str
+    # The commit the running image was built from (set at build time); "dev" when run from
+    # source. Reported by /health so a deploy can be confirmed.
+    app_version: str = "dev"
     cors_origins: str = "http://localhost:5173"
     max_upload_mb: int = Field(default=10, gt=0, le=50)
     # HS256 needs a key of at least 32 bytes (RFC 7518). SecretStr keeps it out of reprs/logs.
@@ -51,8 +54,13 @@ class Settings(BaseSettings):
 
     @property
     def cors_origin_list(self) -> list[str]:
-        """CORS_ORIGINS is a comma-separated list of allowed frontend origins."""
-        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+        """CORS_ORIGINS is a comma-separated list of allowed frontend origins.
+
+        A trailing slash (as a copied site address often has) is dropped: browsers send the
+        origin without one, and it would never match.
+        """
+        origins = (origin.strip().rstrip("/") for origin in self.cors_origins.split(","))
+        return [origin for origin in origins if origin]
 
 
 @lru_cache
