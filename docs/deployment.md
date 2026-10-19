@@ -46,7 +46,8 @@ Follow these steps in order. Each service needs something from the one before it
    - **Postgres version:** **16** (the same as development and CI)
    - **Region:** **AWS Asia Pacific (Singapore)**, next to the Render service
 2. When the project is ready, click **Connect**:
-   - Branch `main`; database `neondb` (the default is fine); the owner role.
+   - The project's default branch (`production` in new projects; older ones call it
+     `main`); database `neondb` (the default is fine); the owner role.
    - **Turn off "Connection pooling".** Bloodline uses the direct connection, both for
      migrations (which need it) and for the app (a family-scale app needs only a few
      connections, well under the free plan's limit).
@@ -266,7 +267,7 @@ checks happen before the push.
 **If a migration damaged data:**
 
 1. Stop deploys: disable the Deploy workflow under **Actions**.
-2. In the Neon console, open **Backup & Restore** and restore the `main` branch to a moment
+2. In the Neon console, open **Backup & Restore** and restore the default branch to a moment
    before the deploy. This is only possible within 6 hours.
 3. Redeploy the previous image with the hook.
 
