@@ -13,7 +13,7 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>
 endobj
 5 0 obj
-<< /Length 1832 >>
+<< /Length 2417 >>
 stream
 BT /F1 9.0 Tf 36.00 800.00 Td (Name : MR. RAVI FICTIONAL K) Tj ET
 BT /F1 9.0 Tf 36.00 786.00 Td (Age/ Gender : 41 years / Male) Tj ET
@@ -25,15 +25,30 @@ BT /F1 9.0 Tf 320.00 758.00 Td (Received : 13/07/26, 06:27 PM) Tj ET
 BT /F1 9.0 Tf 36.00 744.00 Td (Client Name : 9FAKECLIENT01) Tj ET
 BT /F1 9.0 Tf 320.00 744.00 Td (Reported : 13/07/26, 07:13 PM) Tj ET
 BT /F1 9.0 Tf 36.00 730.00 Td (CLINICAL BIOCHEMISTRY) Tj ET
-BT /F1 9.0 Tf 36.00 716.00 Td (TEST DESCRIPTION RESULT UNITS BIOLOGICAL REFERENCE INTERVAL) Tj ET
+BT /F1 9.0 Tf 36.00 716.00 Td (TEST DESCRIPTION) Tj ET
+BT /F1 9.0 Tf 269.00 716.00 Td (RESULT) Tj ET
+BT /F1 9.0 Tf 351.00 716.00 Td (UNITS) Tj ET
+BT /F1 9.0 Tf 404.00 716.00 Td (BIOLOGICAL REFERENCE INTERVAL) Tj ET
 BT /F1 9.0 Tf 36.00 702.00 Td (Liver Function Profile) Tj ET
-BT /F1 9.0 Tf 36.00 688.00 Td (Protein Total 7.2 g/dL 6.4 - 8.3) Tj ET
+BT /F1 9.0 Tf 36.00 688.00 Td (Protein Total) Tj ET
+BT /F1 9.0 Tf 277.00 688.00 Td (7.2) Tj ET
+BT /F1 9.0 Tf 360.00 688.00 Td (g/dL) Tj ET
+BT /F1 9.0 Tf 416.00 688.00 Td (6.4 - 8.3) Tj ET
 BT /F1 9.0 Tf 36.00 674.00 Td (\(Method: Biuret\)) Tj ET
-BT /F1 9.0 Tf 36.00 660.00 Td (Bilirubin Direct 0.21 mg/dL Upto 0.25) Tj ET
+BT /F1 9.0 Tf 36.00 660.00 Td (Bilirubin Direct) Tj ET
+BT /F1 9.0 Tf 277.00 660.00 Td (0.21) Tj ET
+BT /F1 9.0 Tf 360.00 660.00 Td (mg/dL) Tj ET
+BT /F1 9.0 Tf 416.00 660.00 Td (Upto 0.25) Tj ET
 BT /F1 9.0 Tf 36.00 646.00 Td (\(Method: Diazo method\)) Tj ET
-BT /F1 9.0 Tf 36.00 632.00 Td (Aspartate Aminotransferase\(AST/SGOT\) 46 U/L Upto 40) Tj ET
+BT /F1 9.0 Tf 36.00 632.00 Td (Aspartate Aminotransferase\(AST/SGOT\)) Tj ET
+BT /F1 9.0 Tf 277.00 632.00 Td (46) Tj ET
+BT /F1 9.0 Tf 360.00 632.00 Td (U/L) Tj ET
+BT /F1 9.0 Tf 416.00 632.00 Td (Upto 40) Tj ET
 BT /F1 9.0 Tf 36.00 618.00 Td (\(Method: IFCC without P5P\)) Tj ET
-BT /F1 9.0 Tf 36.00 604.00 Td (Vitamin - B12* 345 pg/mL 211 - 911) Tj ET
+BT /F1 9.0 Tf 36.00 604.00 Td (Vitamin - B12*) Tj ET
+BT /F1 9.0 Tf 277.00 604.00 Td (345) Tj ET
+BT /F1 9.0 Tf 360.00 604.00 Td (pg/mL) Tj ET
+BT /F1 9.0 Tf 416.00 604.00 Td (211 - 911) Tj ET
 BT /F1 9.0 Tf 36.00 590.00 Td (\(Method: CLIA\)) Tj ET
 BT /F1 9.0 Tf 36.00 576.00 Td (Interpretation:) Tj ET
 BT /F1 9.0 Tf 36.00 562.00 Td (Low levels of vitamin B12 are seen with poor intake or absorption. Results above 911) Tj ET
@@ -46,7 +61,7 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents 7 0 R >>
 endobj
 7 0 obj
-<< /Length 1692 >>
+<< /Length 2316 >>
 stream
 BT /F1 9.0 Tf 36.00 800.00 Td (Name : MR. RAVI FICTIONAL K) Tj ET
 BT /F1 9.0 Tf 36.00 786.00 Td (Age/ Gender : 41 years / Male) Tj ET
@@ -58,16 +73,32 @@ BT /F1 9.0 Tf 320.00 758.00 Td (Received : 13/07/26, 06:27 PM) Tj ET
 BT /F1 9.0 Tf 36.00 744.00 Td (Client Name : 9FAKECLIENT01) Tj ET
 BT /F1 9.0 Tf 320.00 744.00 Td (Reported : 13/07/26, 07:13 PM) Tj ET
 BT /F1 9.0 Tf 36.00 730.00 Td (HAEMATOLOGY) Tj ET
-BT /F1 9.0 Tf 36.00 716.00 Td (TEST DESCRIPTION RESULT UNITS BIOLOGICAL REFERENCE INTERVAL) Tj ET
+BT /F1 9.0 Tf 36.00 716.00 Td (TEST DESCRIPTION) Tj ET
+BT /F1 9.0 Tf 269.00 716.00 Td (RESULT) Tj ET
+BT /F1 9.0 Tf 351.00 716.00 Td (UNITS) Tj ET
+BT /F1 9.0 Tf 404.00 716.00 Td (BIOLOGICAL REFERENCE INTERVAL) Tj ET
 BT /F1 9.0 Tf 36.00 702.00 Td (Complete Blood Count \(CBC\)) Tj ET
-BT /F1 9.0 Tf 36.00 688.00 Td (Hemoglobin \(Hb\)* 13.9 g/dL 13.0 - 17.0) Tj ET
+BT /F1 9.0 Tf 36.00 688.00 Td (Hemoglobin \(Hb\)*) Tj ET
+BT /F1 9.0 Tf 277.00 688.00 Td (13.9) Tj ET
+BT /F1 9.0 Tf 360.00 688.00 Td (g/dL) Tj ET
+BT /F1 9.0 Tf 416.00 688.00 Td (13.0 - 17.0) Tj ET
 BT /F1 9.0 Tf 36.00 674.00 Td (\(Method: Photometry\)) Tj ET
-BT /F1 9.0 Tf 36.00 660.00 Td (RBC Count 4.82 mil/µL 4.5 - 5.5) Tj ET
+BT /F1 9.0 Tf 36.00 660.00 Td (RBC Count) Tj ET
+BT /F1 9.0 Tf 277.00 660.00 Td (4.82) Tj ET
+BT /F1 9.0 Tf 360.00 660.00 Td (mil/µL) Tj ET
+BT /F1 9.0 Tf 416.00 660.00 Td (4.5 - 5.5) Tj ET
 BT /F1 9.0 Tf 36.00 646.00 Td (\(Method: Electrical impedance\)) Tj ET
-BT /F1 9.0 Tf 36.00 632.00 Td (Total Leucocyte Count \(WBC\) 6500 cells/Cumm 4000 - 10000) Tj ET
-BT /F1 9.0 Tf 36.00 618.00 Td (Absolute Neutrophil Count 3.90 * 10^9/L 2.0 - 7.0) Tj ET
+BT /F1 9.0 Tf 36.00 632.00 Td (Total Leucocyte Count \(WBC\)) Tj ET
+BT /F1 9.0 Tf 277.00 632.00 Td (6500) Tj ET
+BT /F1 9.0 Tf 360.00 632.00 Td (cells/Cumm) Tj ET
+BT /F1 9.0 Tf 416.00 632.00 Td (4000 - 10000) Tj ET
+BT /F1 9.0 Tf 36.00 618.00 Td (Absolute Neutrophil Count) Tj ET
+BT /F1 9.0 Tf 277.00 618.00 Td (3.90) Tj ET
+BT /F1 9.0 Tf 360.00 618.00 Td (* 10^9/L) Tj ET
+BT /F1 9.0 Tf 416.00 618.00 Td (2.0 - 7.0) Tj ET
 BT /F1 9.0 Tf 36.00 604.00 Td (\(Method: Calculated\)) Tj ET
-BT /F1 9.0 Tf 36.00 590.00 Td (RBC Morphology Normocytic Normochromic) Tj ET
+BT /F1 9.0 Tf 36.00 590.00 Td (RBC Morphology) Tj ET
+BT /F1 9.0 Tf 246.00 590.00 Td (Normocytic Normochromic) Tj ET
 BT /F1 9.0 Tf 36.00 576.00 Td (Remarks Smear reviewed for Ravi Fictional K, queries on 9876501234) Tj ET
 BT /F1 9.0 Tf 36.00 562.00 Td (NOTE : This sample is processed at Synthetic Diagnostics Pvt Ltd \(Testpur\) Lab.) Tj ET
 BT /F1 9.0 Tf 36.00 548.00 Td (Page 2 of 3) Tj ET
@@ -95,12 +126,12 @@ xref
 0000000133 00000 n 
 0000000230 00000 n 
 0000000356 00000 n 
-0000002239 00000 n 
-0000002365 00000 n 
-0000004108 00000 n 
-0000004234 00000 n 
+0000002824 00000 n 
+0000002950 00000 n 
+0000005317 00000 n 
+0000005443 00000 n 
 trailer
 << /Size 10 /Root 1 0 R >>
 startxref
-4648
+5857
 %%EOF

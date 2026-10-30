@@ -38,6 +38,14 @@ class PageKind(StrEnum):
     OTHER = "other"  # cover, status summary, vitals, marketing
 
 
+def is_table_heading(line: str, layout: Layout) -> bool:
+    return bool(_RESULTS_TABLE[layout].match(line))
+
+
+def is_footer(line: str, layout: Layout) -> bool:
+    return bool(_FOOTER[layout].match(line))
+
+
 def page_layout(text: str) -> Layout | None:
     """The layout of a results page, or None for any other page."""
     for line in text.splitlines():

@@ -8,20 +8,21 @@ show the user; nothing is left half-written.
 
 import logging
 import re
+import threading
 import uuid
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from datetime import date, datetime
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.models import CanonicalMetric, Metric, Patient, Report, ReportFile, Sex
 from app.schemas.report import ConfirmReport
 from app.services.extraction import ExtractedReport, ExtractionError, extract_report
-from app.services.llm import ChatClient, LLMError
+from app.services.llm import ChatClient, Effort, LLMError
 from app.services.normalization import Bounds, compute_flag, convert, load_metric_index
 from app.services.normalization.values import parse_number
 from app.services.structuring import StructuredReport, StructuringError, structure_report
@@ -33,6 +34,11 @@ SessionFactory = Callable[[], AbstractContextManager[Session]]
 ClientFactory = Callable[[], ChatClient]
 
 UNEXPECTED_FAILURE = "Processing failed unexpectedly. Please try again."
+INTERRUPTED = "Reading this report was interrupted (the server restarted). Please try again."
+
+# One report is read at a time: reports that need the AI share its per-minute token limit,
+# and two at once used to push each other's pages over it.
+_ONE_AT_A_TIME = threading.Lock()
 
 
 class StoredProcessing(BaseModel):
@@ -94,6 +100,36 @@ def member_mismatch_warnings(extracted: ExtractedReport, patient: Patient) -> li
 # --- background processing -----------------------------------------------------------------
 
 
+class _ClientWhenNeeded:
+    """The AI client, created only when a page needs the AI: most reports are read from their
+    tables alone, so a missing GROQ_API_KEY only matters for the pages that do."""
+
+    def __init__(self, factory: ClientFactory) -> None:
+        self._factory = factory
+        self._client: ChatClient | None = None
+
+    def complete_json(
+        self,
+        *,
+        model: str,
+        system: str,
+        user: str,
+        schema_name: str,
+        schema: dict[str, Any],
+        effort: Effort = "low",
+    ) -> str:
+        if self._client is None:
+            self._client = self._factory()
+        return self._client.complete_json(
+            model=model,
+            system=system,
+            user=user,
+            schema_name=schema_name,
+            schema=schema,
+            effort=effort,
+        )
+
+
 def _process(session: Session, report: Report, client_factory: ClientFactory, model: str) -> None:
     pdf = session.get_one(ReportFile, report.id).content
     patient = session.get_one(Patient, report.patient_id)
@@ -103,8 +139,15 @@ def _process(session: Session, report: Report, client_factory: ClientFactory, mo
         extracted,
         patient_sex=cast(Sex, patient.sex),  # guaranteed by ck_patients_sex_valid
         metric_index=load_metric_index(session),
-        client=client_factory(),
+        client=_ClientWhenNeeded(client_factory),
         model=model,
+    )
+    logger.info(
+        "Report %s read: %d pages, %d rows, %d review warnings",
+        report.id,
+        len(extracted.pages),
+        len(structured.metrics),
+        len(structured.warnings),
     )
     warnings = [
         *extracted.warnings,
@@ -137,7 +180,7 @@ def process_report(
     client_factory: ClientFactory,
     model: str,
 ) -> None:
-    with session_factory() as session:
+    with _ONE_AT_A_TIME, session_factory() as session:
         report = session.get(Report, report_id)
         if report is None or report.status != "processing":
             return
@@ -149,6 +192,21 @@ def process_report(
         except Exception:
             logger.exception("Unexpected error while processing report %s", report_id)
             _mark_failed(session, report_id, UNEXPECTED_FAILURE)
+
+
+def fail_interrupted_reports(session: Session) -> int:
+    """Reports left "processing" when the server stopped (a restart, a deploy, or Render's
+    free tier sleeping) are never finished: reading runs inside the server. Run when the
+    server starts, before it takes requests, they are marked failed so they can be retried.
+    Returns how many."""
+    interrupted = session.scalars(
+        update(Report)
+        .where(Report.status == "processing")
+        .values(status="failed", failure_reason=INTERRUPTED, raw_extraction=None)
+        .returning(Report.id)
+    ).all()
+    session.commit()
+    return len(interrupted)
 
 
 # --- confirm -------------------------------------------------------------------------------

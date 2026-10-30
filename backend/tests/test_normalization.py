@@ -191,6 +191,14 @@ def test_an_interval_printed_before_the_colon_is_read_as_the_range() -> None:
     assert oriented(RangeLine(label="Male", text="39 - 259")) == RangeLine("Male", "39 - 259")
 
 
+def test_an_age_band_is_not_mistaken_for_a_range_printed_first() -> None:
+    # Thyrocare ESR: "<50 yr : Male: 0-15 mm/hr". The band is no range for men of any age.
+    esr = RangeLine(label="<50 yr", text="Male: 0-15 mm/hr")
+
+    assert oriented(esr) == esr
+    assert select_range([esr], "male") is None
+
+
 @pytest.mark.parametrize(
     ("lines", "expected"),
     [

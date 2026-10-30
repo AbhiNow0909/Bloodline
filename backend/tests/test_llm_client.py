@@ -490,14 +490,24 @@ def test_a_too_large_answer_with_a_wait_is_tried_once_more(
     assert (len(fake.calls), sleeps) == (2, [15.0])
 
 
-def test_a_second_too_large_answer_is_final(
+def test_too_large_answers_with_a_wait_are_retried_like_busy_ones(
     monkeypatch: pytest.MonkeyPatch, sleeps: list[float]
 ) -> None:
-    fake = FakeCreate(too_large("15"), too_large("15"))
+    # Two reports read at once used to fail pages this way after a single wait.
+    fake = FakeCreate(too_large("15"), too_large("12"), "{}")
+
+    assert complete(make_client(monkeypatch, fake, sleeps)) == "{}"
+    assert (len(fake.calls), sleeps) == (3, [15.0, 12.0])
+
+
+def test_too_large_answers_are_final_after_the_last_attempt(
+    monkeypatch: pytest.MonkeyPatch, sleeps: list[float]
+) -> None:
+    fake = FakeCreate(*[too_large("15")] * 4)  # this client makes 4 attempts
 
     with pytest.raises(LLMTooLargeError, match="requested 8212 of 8000 tokens"):
         complete(make_client(monkeypatch, fake, sleeps))
-    assert (len(fake.calls), sleeps) == (2, [15.0])
+    assert (len(fake.calls), sleeps) == (4, [15.0] * 3)
 
 
 def test_a_too_large_answer_with_a_long_wait_is_final_at_once(

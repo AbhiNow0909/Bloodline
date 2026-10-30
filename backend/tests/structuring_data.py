@@ -172,14 +172,28 @@ def seed_metric_index() -> MetricIndex:
 
 class FakeChatClient:
     """Stands in for the Groq client at the `ChatClient` boundary: replies with `reply`
-    (or raises it, if it is an exception) and records every call."""
+    (or raises it, if it is an exception) and records every call.
 
-    def __init__(self, reply: dict[str, Any] | str | Exception = SYNTHETIC_LLM_REPLY) -> None:
+    A reply listing "tests" is answered as a model would answer a page: with the tests whose
+    values are printed in the text sent. `per_page=False` returns the whole reply every time."""
+
+    def __init__(
+        self,
+        reply: dict[str, Any] | str | Exception = SYNTHETIC_LLM_REPLY,
+        *,
+        per_page: bool = True,
+    ) -> None:
         self.reply = reply
+        self.per_page = per_page
         self.calls: list[dict[str, Any]] = []
 
     def complete_json(self, **kwargs: Any) -> str:
         self.calls.append(kwargs)
         if isinstance(self.reply, Exception):
             raise self.reply
-        return self.reply if isinstance(self.reply, str) else json.dumps(self.reply)
+        if isinstance(self.reply, str):
+            return self.reply
+        if self.per_page and "tests" in self.reply:
+            printed = [t for t in self.reply["tests"] if t.get("value", "") in kwargs["user"]]
+            return json.dumps({**self.reply, "tests": printed})
+        return json.dumps(self.reply)

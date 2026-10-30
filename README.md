@@ -30,11 +30,12 @@ Mum's HbA1c changed over the last two years?"* or *"Who in the family has high L
   (e.g. HealthMap Diagnostics).
 - **Privacy-first structuring**: names, addresses, phone numbers, barcodes and doctor
   names are removed locally before any text goes to an LLM.
-- **Structuring you can check**: an LLM (`gpt-oss-20b` on Groq, strict JSON output) only
-  splits the scrubbed text into rows and copies what is printed. Every number, the
-  reference range for the member's sex, unit conversions, the match to the metric
-  dictionary and the flag are computed in code, and each value is checked against the
-  report text.
+- **Structuring you can check**: results are read from the report's tables by where each
+  word is printed (name, method, value, unit and range columns), in code, with no AI. Only a
+  page whose table cannot be read that way goes to an LLM (`gpt-oss-20b` on Groq, strict
+  JSON output), which only copies what is printed. Every number, the reference range for the
+  member's sex, unit conversions, the match to the metric dictionary and the flag are
+  computed in code, and each value is checked against the report text.
 - **Human review**: extracted values are held as *pending review* until you confirm or
   correct them.
 - **History and trend charts**: charts for each metric, with the reference range drawn as a
@@ -67,7 +68,7 @@ Mum's HbA1c changed over the last two years?"* or *"Who in the family has high L
 React SPA (Vercel) ──HTTPS + JWT──▶ FastAPI (Docker on Render)
                                       │
                                       ├─ Ingestion: PDF → text → local header parse
-                                      │    → PII scrub → LLM structuring → validate
+                                      │    → PII scrub → table rows → validate
                                       │    → pending_review → confirm → metrics + embeddings
                                       │
                                       ├─ Query agent: LLM + typed tools (SQL, vector search)
@@ -90,7 +91,7 @@ React SPA (Vercel) ──HTTPS + JWT──▶ FastAPI (Docker on Render)
 │   │   ├── schemas/        # Pydantic schemas
 │   │   └── services/
 │   │       ├── extraction/     # PDF text, header parse, PII scrub
-│   │       ├── structuring/    # LLM → structured metrics
+│   │       ├── structuring/    # table rows (AI per page if needed) → metrics
 │   │       ├── normalization/  # metric dictionary, units, ranges
 │   │       ├── embeddings/     # local embeddings
 │   │       ├── agent/          # query agent tools + orchestrator
@@ -265,25 +266,38 @@ reviewed text and range.
   is skipped, and the review says so ("Page 26 has no text (a picture) and was skipped…").
   Anywhere else, or in a report with no text at all, the report fails ("scanned/image PDF
   not supported yet"), because a scanned page could hide results.
-- **Long reports** (health checkups of 20+ pages) are sent to the AI in parts of whole pages
-  (at most `MAX_PART_CHARS`, 6,000 characters), because Groq's free tier allows
-  `gpt-oss-20b` 8,000 tokens a minute and a whole checkup is larger than that. Later parts
-  wait for the per-minute window (Groq's Retry-After, up to a minute, 6 attempts), so such a
-  report takes a few minutes; the rows are merged in page order and every value is still
-  checked against the text of its own part.
+- **Reading the tables**: pdfplumber gives each word's position. On a line, words a normal
+  space apart (about 3 points) form a cell; a wider gap starts the next cell. Each cell is
+  placed in the column whose heading it lines up with best (TEST NAME, TECHNOLOGY or
+  METHODOLOGY, VALUE or RESULT, UNITS, the reference interval); text running across columns
+  is a note. Rows then become tests: Thyrocare's ranges after "Bio. Ref. Interval." (two
+  range tables side by side stay apart, "||" separates ranges on one line, a line with both
+  sexes is two ranges but an age band stays whole) and "Method : …" lines; MediBuddy's
+  "(Method: …)" lines and ranges that continue below a row; headings as the panel; the lab's
+  remarks, explanations, method keys and guideline tables are skipped. A 20-page health
+  checkup is read in about two seconds, with no AI.
+- **Pages the AI reads**: a page whose table gives no rows, or leaves a line that looks like
+  a result unread, is sent to the AI, one page at a time and only its scrubbed text. The
+  model now and then declines a page or breaks the JSON ("I'm sorry, but I can't help with
+  that"), so a page is tried with low reasoning effort, then medium (about three times the
+  tokens). A page the AI cannot read keeps the rows read from its table, and the review says
+  what may be missing ("Page 7 may have results that were not read: …", or "Page 7 of the
+  PDF could not be read… Add them from the PDF with *Add a test that was missed*"). A report
+  fails only if nothing at all could be read; if the AI service was unavailable, its message
+  says when to try again.
 - Groq's strict JSON mode sometimes rejects a reply only because the model left out a field
   it would have set to null (`json_validate_failed`). That reply is taken from Groq's error
   and checked by our own models instead, where a missing optional field counts as null and
   anything else wrong still fails.
-- **The model now and then declines or breaks a reply** ("I'm sorry, but I can't help with
-  that", or JSON in a broken shape), and not the same way twice. A part of several pages
-  that fails is read page by page; each page is tried with low reasoning effort, then medium
-  (which reads pages that low declines, at about three times the tokens); a page that still
-  fails is left out and the review says so first ("The AI could not read page 2 of the PDF…
-  Add them from the PDF with *Add a test that was missed*").
-- **Groq's "request too large" (413)** is not always about the request: it also comes when
-  the current minute is nearly spent, with a "retry after N seconds". That wait is taken
-  once; a second 413 counts like a declined part or page.
+- **Groq's limits**: `gpt-oss-20b` allows 8,000 tokens a minute and 200,000 a day on the
+  free tier, and one dense page with its reply can take ~10,000. Reports are read one at a
+  time, and "rate limited" (429) or "request too large" (413) answers that say when to try
+  again are waited out (up to a minute, 6 attempts). A wait longer than that, such as the
+  daily limit, is not taken: the page is left for review as above.
+- **Interrupted reading**: reports are read inside the server, so one being read when the
+  server stops (a deploy, a restart, Render's free tier going to sleep) would never finish.
+  The Docker image runs `python -m app.cli.startup` before the server: it marks such reports
+  failed ("Reading this report was interrupted…"), and *Try reading it again* reads them.
 - **Skipped rows**: the model sometimes leaves out a test. Where a lab prints the range on
   the result's own line (MediBuddy), any line shaped like a result ("P-LCR 33.5 % 13 - 43")
   that no returned row accounts for is named in a review warning ("Page 3 may have results
@@ -297,12 +311,6 @@ reviewed text and range.
   < 4.00"), "> = 90". A single "good" category (Normal, Desirable, Optimal, Sufficiency,
   Non-Diabetic) is the range; several good categories, subgroups (smokers, age bands) or risk
   bands stay for the reviewer to choose.
-- **Daily limit**: Groq's free tier also allows `gpt-oss-20b` 200,000 tokens a day (rolling).
-  A 20-page health checkup uses roughly 30,000; a few long reports, or repeated retries, in
-  one day can use it up. When Groq asks for a longer wait than the client allows, the report
-  fails at once with when to try again ("The AI service's free daily limit is used up. Please
-  try again in about 25 minutes.") and can be retried from its page. Chat and explanations
-  use `gpt-oss-120b`, which has its own limits.
 
 ### History and trends
 
@@ -527,8 +535,9 @@ pull request, and on demand:
   against Postgres, checks that `/health` returns 200 and that the container is not running
   as root, then migrates and seeds the empty database from inside the image (twice for the
   seed, to prove it is idempotent), creates a user with the CLI, logs in, creates a family
-  and a member through the API, uploads the synthetic report (which must fail cleanly for
-  lack of a Groq key in CI, then be refused as a duplicate), checks that chat answers 503
+  and a member through the API, uploads the synthetic report (which is read from its tables
+  and reaches review with its 4 rows although CI has no Groq key, then is refused as a
+  duplicate), runs the startup command (no interrupted reports), checks that chat answers 503
   ("GROQ_API_KEY is not set") with a token and 401 without one, and extracts the report inside
   the image.
   Finally it embeds the synthetic report with the model baked into the image, with networking

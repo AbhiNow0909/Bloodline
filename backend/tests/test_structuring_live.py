@@ -1,20 +1,23 @@
-"""Optional end-to-end check against the real Groq API, using the SYNTHETIC report only.
+"""Optional end-to-end check against the real Groq API, using the SYNTHETIC reports only.
 
-Skipped unless GROQ_API_KEY is set (it is not in CI). Deselect locally with `-m "not live"`.
+Reports are normally read from their tables; these tests use versions that only the AI can
+read, so the AI path is what they check. Skipped unless GROQ_API_KEY is set (it is not in
+CI). Deselect locally with `-m "not live"`.
 """
 
 from decimal import Decimal
+from typing import Any
 
 import pytest
 
 from app.config import get_settings
-from app.services.extraction import extract_report
+from app.services.extraction import ExtractedReport, extract_report
 from app.services.llm import get_structuring_client
 from app.services.structuring import structure_report
 from app.services.structuring.service import VALUE_NOT_IN_SOURCE
 from tests import synthetic_medibuddy as medibuddy
+from tests import synthetic_pdf as thyrocare
 from tests.structuring_data import seed_metric_index
-from tests.synthetic_pdf import FIXTURE_PATH
 
 pytestmark = [
     pytest.mark.live,
@@ -22,14 +25,31 @@ pytestmark = [
 ]
 
 
+class CountingClient:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def complete_json(self, **kwargs: Any) -> str:
+        self.calls += 1
+        return get_structuring_client().complete_json(**kwargs)
+
+
+def without_tables(report: ExtractedReport) -> ExtractedReport:
+    pages = tuple(page.model_copy(update={"table": ()}) for page in report.pages)
+    return report.model_copy(update={"pages": pages})
+
+
 def test_synthetic_report_structures_end_to_end() -> None:
+    client = CountingClient()
     result = structure_report(
-        extract_report(FIXTURE_PATH.read_bytes()),
+        extract_report(thyrocare.synthetic_report(columns=False)),
         patient_sex="female",
         metric_index=seed_metric_index(),
-        client=get_structuring_client(),
+        client=client,
         model=get_settings().structuring_model,
     )
+
+    assert client.calls >= 3  # a page at a time
 
     by_name = {m.canonical_name: m for m in result.metrics}
     assert set(by_name) == {
@@ -51,13 +71,16 @@ def test_synthetic_report_structures_end_to_end() -> None:
 
 
 def test_synthetic_medibuddy_report_structures_end_to_end() -> None:
+    client = CountingClient()
     result = structure_report(
-        extract_report(medibuddy.FIXTURE_PATH.read_bytes()),
+        without_tables(extract_report(medibuddy.FIXTURE_PATH.read_bytes())),
         patient_sex="male",
         metric_index=seed_metric_index(),
-        client=get_structuring_client(),
+        client=client,
         model=get_settings().structuring_model,
     )
+
+    assert client.calls >= 2
 
     by_name = {m.canonical_name: m for m in result.metrics if m.canonical_name}
     expected = {

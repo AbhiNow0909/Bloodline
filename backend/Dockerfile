@@ -64,5 +64,6 @@ WORKDIR /app
 
 EXPOSE 8000
 
-# Render injects PORT; locally it defaults to 8000. `exec` lets uvicorn receive signals.
-CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# First mark reports left half-read by a previous run as failed (app/cli/startup.py), then
+# serve. Render injects PORT; locally it defaults to 8000. `exec` lets uvicorn receive signals.
+CMD ["sh", "-c", "python -m app.cli.startup; exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

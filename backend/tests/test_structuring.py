@@ -1,4 +1,5 @@
-"""Structuring with the LLM replaced at the `ChatClient` boundary."""
+"""Structuring: results read from tables, and pages the tables cannot give read by the AI,
+which is replaced at the `ChatClient` boundary."""
 
 import copy
 import json
@@ -10,7 +11,13 @@ from pydantic import BaseModel
 
 from app.models import Sex
 from app.services.extraction import ExtractedReport, PiiLeakError, extract_report
-from app.services.llm import LLMRefusalError, LLMRequestError, LLMTooLargeError
+from app.services.extraction.schemas import Column, TableCell, TableLine
+from app.services.llm import (
+    LLMRefusalError,
+    LLMRequestError,
+    LLMTooLargeError,
+    LLMUnavailableError,
+)
 from app.services.structuring import (
     StructuredReport,
     StructuringError,
@@ -30,7 +37,11 @@ from tests import synthetic_pdf as fake
 from tests.structuring_data import SYNTHETIC_LLM_REPLY, FakeChatClient, seed_metric_index
 from tests.synthetic_pdf import FIXTURE_PATH
 
-REPORT = extract_report(FIXTURE_PATH.read_bytes())
+# The synthetic report printed without column gaps: its tables cannot be read from word
+# positions, so every page goes to the AI. Most tests here are about that path.
+REPORT = extract_report(fake.synthetic_report(columns=False))
+# The committed fixture, laid out in columns like real reports: read without the AI.
+TABLE_REPORT = extract_report(FIXTURE_PATH.read_bytes())
 INDEX = seed_metric_index()
 
 
@@ -39,8 +50,9 @@ def structure(
     *,
     sex: Sex = "female",
     report: ExtractedReport = REPORT,
+    per_page: bool = True,
 ) -> tuple[StructuredReport, FakeChatClient]:
-    client = FakeChatClient(reply)
+    client = FakeChatClient(reply, per_page=per_page)
     result = structure_report(
         report, patient_sex=sex, metric_index=INDEX, client=client, model="test-model"
     )
@@ -67,19 +79,21 @@ def test_llm_schema_is_strict_and_matches_the_models() -> None:
     LlmReport.model_validate(SYNTHETIC_LLM_REPLY)  # the recorded reply fits the models
 
 
-def test_the_llm_receives_only_the_scrubbed_text() -> None:
+def test_the_llm_receives_only_the_scrubbed_text_one_page_at_a_time() -> None:
     _, client = structure()
 
-    (call,) = client.calls
-    assert call == {
-        "model": "test-model",
-        "system": SYSTEM_PROMPT,
-        "user": REPORT.llm_text(),
-        "schema_name": "lab_report",
-        "schema": LLM_REPORT_SCHEMA,
-        "effort": "low",
-    }
-    everything_sent = json.dumps(call).lower()
+    assert client.calls == [
+        {
+            "model": "test-model",
+            "system": SYSTEM_PROMPT,
+            "user": page,
+            "schema_name": "lab_report",
+            "schema": LLM_REPORT_SCHEMA,
+            "effort": "low",
+        }
+        for page in REPORT.page_llm_texts()
+    ]
+    everything_sent = json.dumps(client.calls).lower()
     for value in (fake.NAME, fake.REFERRED_BY, fake.URINE_BARCODE, fake.PHONE, fake.EMAIL):
         assert value.lower() not in everything_sent
 
@@ -140,7 +154,7 @@ def test_a_value_the_llm_made_up_is_flagged_for_review() -> None:
     reply = json.loads(json.dumps(SYNTHETIC_LLM_REPLY))
     reply["tests"][0]["value"] = "48.20"  # not printed anywhere in the report
 
-    result, _ = structure(reply)
+    result, _ = structure(reply, per_page=False)
 
     assert VALUE_NOT_IN_SOURCE in result.metrics[0].warnings
 
@@ -284,13 +298,82 @@ def test_a_name_missing_from_the_text_is_flagged() -> None:
     assert NAME_NOT_IN_SOURCE in row.warnings
 
 
-# --- large reports: sent in parts of whole pages ----------------------------------------------
+# --- results read from the tables --------------------------------------------------------
 
 
-class PartwiseClient:
-    """Replies to each part with the synthetic tests whose values are printed in that part,
-    as the model would. Calls numbered in `broken` (1-based) get a reply in a broken shape, and
-    a request containing any of `refuse` is declined, as gpt-oss sometimes does."""
+class NoAI:
+    def complete_json(self, **kwargs: Any) -> str:
+        raise AssertionError("the AI was asked")
+
+
+def test_a_report_read_from_its_tables_needs_no_ai() -> None:
+    from_tables = structure_report(
+        TABLE_REPORT, patient_sex="female", metric_index=INDEX, client=NoAI(), model="test-model"
+    )
+
+    # The same reviewable rows as from the real model's recorded reply for this report.
+    from_ai, _ = structure()
+    assert from_tables == from_ai
+    assert from_tables.warnings == ()
+
+
+def _with_unread_line(report: ExtractedReport, page: int) -> ExtractedReport:
+    """The report with a line on one page that looks like a result but cannot be read as a
+    row (two numbers in the value column)."""
+    unreadable = TableLine(
+        cells=(
+            TableCell(column=Column.NAME, text="MYSTERY TEST"),
+            TableCell(column=Column.TECHNOLOGY, text="PHOTOMETRY"),
+            TableCell(column=Column.VALUE, text="4.5 6.7"),
+            TableCell(column=Column.UNIT, text="mg/dL"),
+        )
+    )
+    pages = list(report.pages)
+    first, *rest = pages[page].table  # below the first row, before the page's closing notes
+    pages[page] = pages[page].model_copy(update={"table": (first, unreadable, *rest)})
+    return report.model_copy(update={"pages": tuple(pages)})
+
+
+def test_a_page_with_a_result_left_unread_is_given_to_the_ai() -> None:
+    report = _with_unread_line(TABLE_REPORT, page=2)
+    client = FakeChatClient(SYNTHETIC_LLM_REPLY)
+
+    result = structure_report(
+        report, patient_sex="female", metric_index=INDEX, client=client, model="test-model"
+    )
+
+    assert [call["user"] for call in client.calls] == [report.page_llm_texts()[2]]  # page 5
+    assert [m.raw_name for m in result.metrics][-1] == "FERRITIN"
+    assert result.warnings == ()
+
+
+def test_without_the_ai_a_page_keeps_its_table_rows_and_names_what_is_missing() -> None:
+    report = _with_unread_line(TABLE_REPORT, page=2)
+    busy = FakeChatClient(LLMUnavailableError("The AI service is busy. Please try again."))
+
+    result = structure_report(
+        report, patient_sex="female", metric_index=INDEX, client=busy, model="m"
+    )
+
+    assert len(result.metrics) == 4  # every row read from the tables
+    assert result.warnings == (service.possibly_missed_warning(5, ["MYSTERY TEST"]),)
+
+
+def test_with_nothing_read_and_no_ai_the_report_fails_with_the_ai_service_message() -> None:
+    busy = FakeChatClient(LLMUnavailableError("The AI service is busy. Please try again."))
+
+    with pytest.raises(LLMUnavailableError, match="busy"):
+        structure_report(REPORT, patient_sex="female", metric_index=INDEX, client=busy, model="m")
+    assert len(busy.calls) == 1  # not asked again for the other pages
+
+
+# --- pages read by the AI ------------------------------------------------------------------
+
+
+class PagewiseClient:
+    """Replies to each page with the synthetic tests whose values are printed on it, as the
+    model would. Calls numbered in `broken` (1-based) get a reply in a broken shape, and a
+    request containing any of `refuse` is declined, as gpt-oss sometimes does."""
 
     def __init__(
         self,
@@ -317,73 +400,30 @@ class PartwiseClient:
 PAGES = REPORT.page_llm_texts()  # creatinine; microalbumin + ratio; ferritin
 
 
-def texts(parts: list[service.ReportPart]) -> list[str]:
-    return [part.text for part in parts]
-
-
-def test_a_small_report_is_one_part() -> None:
-    (part,) = service.report_parts(REPORT)
-    assert part.text == REPORT.llm_text()
-    assert part.page_numbers == (3, 4, 5)
-
-
-def test_parts_are_whole_pages_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(service, "MAX_PART_CHARS", len(PAGES[0]) + 2 + len(PAGES[1]))
-    parts = service.report_parts(REPORT)
-    assert texts(parts) == [f"{PAGES[0]}\n\n{PAGES[1]}", PAGES[2]]
-    assert [part.page_numbers for part in parts] == [(3, 4), (5,)]
-
-    # A page longer than the limit is still sent whole, on its own.
-    monkeypatch.setattr(service, "MAX_PART_CHARS", 10)
-    assert texts(service.report_parts(REPORT)) == PAGES
-
-
-def test_a_large_report_is_structured_part_by_part(monkeypatch: pytest.MonkeyPatch) -> None:
-    whole, _ = structure()  # the same report in a single request
-    monkeypatch.setattr(service, "MAX_PART_CHARS", 10)
-    client = PartwiseClient()
-
-    result = structure_report(
-        REPORT, patient_sex="female", metric_index=INDEX, client=client, model="test-model"
-    )
-
-    # One request per part, each with only that part's text; the rows come back merged, in
-    # page order, exactly as from a single request.
-    assert [call["user"] for call in client.calls] == PAGES
-    assert result == whole
-    assert all(not metric.warnings for metric in result.metrics)
-
-
-def test_each_value_is_checked_against_its_own_part(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(service, "MAX_PART_CHARS", 10)
-
-    # A model answering every part with all four tests: rows not printed in that part are
+def test_each_value_is_checked_against_its_own_page() -> None:
+    # A model answering every page with all four tests: rows not printed on that page are
     # flagged (1 + 2 + 1 printed of 4 + 4 + 4 returned).
-    result, client = structure()
+    result, client = structure(per_page=False)
 
     assert len(client.calls) == 3
     flagged = [m for m in result.metrics if VALUE_NOT_IN_SOURCE in m.warnings]
     assert len(result.metrics) - len(flagged) == 4
 
 
-def test_identity_in_any_part_stops_before_anything_is_sent(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(service, "MAX_PART_CHARS", 10)
+def test_identity_on_any_page_stops_before_anything_is_sent() -> None:
     last = REPORT.pages[-1]
     leaky_page = last.model_copy(update={"text": last.text + f"\n{fake.NAME}"})
     leaky = REPORT.model_copy(update={"pages": (*REPORT.pages[:-1], leaky_page)})
-    client = PartwiseClient()
+    client = PagewiseClient()
 
     with pytest.raises(PiiLeakError):
         structure_report(leaky, patient_sex="female", metric_index=INDEX, client=client, model="m")
-    assert client.calls == []  # not even the clean first parts
+    assert client.calls == []  # not even the clean first pages
 
 
-def test_a_broken_page_is_read_again_with_more_reasoning(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_broken_page_is_read_again_with_more_reasoning() -> None:
     whole, _ = structure()
-    monkeypatch.setattr(service, "MAX_PART_CHARS", 10)
-    client = PartwiseClient(broken=(2,))
+    client = PagewiseClient(broken=(2,))
 
     result = structure_report(
         REPORT, patient_sex="female", metric_index=INDEX, client=client, model="test-model"
@@ -398,18 +438,18 @@ def test_a_broken_page_is_read_again_with_more_reasoning(monkeypatch: pytest.Mon
     assert result == whole
 
 
-def test_other_errors_still_fail_the_whole_report() -> None:
+def test_other_errors_stop_asking_the_ai() -> None:
     client = FakeChatClient(LLMRequestError("The AI service rejected the request (status 401)."))
 
     with pytest.raises(LLMRequestError):
         structure_report(REPORT, patient_sex="female", metric_index=INDEX, client=client, model="m")
-    assert len(client.calls) == 1  # no retries or splitting for these
+    assert len(client.calls) == 1  # no retries, no other pages
 
 
 def test_a_field_left_out_by_the_model_counts_as_null() -> None:
     reply = copy.deepcopy(SYNTHETIC_LLM_REPLY)
     for test in reply["tests"]:
-        del test["panel"]  # as gpt-oss-20b sometimes does on parts without headings
+        del test["panel"]  # as gpt-oss-20b sometimes does on pages without headings
 
     result, _ = structure(reply)
 
@@ -420,44 +460,31 @@ def test_a_field_left_out_by_the_model_counts_as_null() -> None:
 
 def test_a_required_field_left_out_is_still_rejected() -> None:
     reply = copy.deepcopy(SYNTHETIC_LLM_REPLY)
-    del reply["tests"][0]["value"]
+    for test in reply["tests"]:
+        del test["value"]
 
     with pytest.raises(StructuringError, match="could not read this report"):
-        structure(reply)
+        structure(reply, per_page=False)
 
 
-# --- the model declining a request ------------------------------------------------------------
-
-
-def test_a_declined_part_is_read_page_by_page() -> None:
-    whole, _ = structure()
-    client = PartwiseClient(refuse=(PAGES[0] + "\n\n" + PAGES[1],))  # only the whole part
-
-    result = structure_report(
-        REPORT, patient_sex="female", metric_index=INDEX, client=client, model="test-model"
-    )
-
-    # Asked once as a whole (cheaply), then page by page.
-    assert [call["user"] for call in client.calls] == [REPORT.llm_text(), *PAGES]
-    assert {call["effort"] for call in client.calls} == {"low"}
-    assert result == whole  # same rows, same order, no warnings
+# --- the model declining a page ---------------------------------------------------------------
 
 
 def test_a_page_declined_with_little_reasoning_is_read_with_more() -> None:
     whole, _ = structure()
-    client = PartwiseClient(refuse=("FERRITIN",), refuse_at=("low",))
+    client = PagewiseClient(refuse=("FERRITIN",), refuse_at=("low",))
 
     result = structure_report(
         REPORT, patient_sex="female", metric_index=INDEX, client=client, model="test-model"
     )
 
     ferritin = [call["effort"] for call in client.calls if "FERRITIN" in call["user"]]
-    assert ferritin == ["low", "low", "medium"]  # the whole report, then its page twice
+    assert ferritin == ["low", "medium"]
     assert result == whole
 
 
 def test_a_page_still_declined_is_left_out_with_a_review_warning() -> None:
-    client = PartwiseClient(refuse=(PAGES[0] + "\n\n" + PAGES[1], "FERRITIN"))
+    client = PagewiseClient(refuse=("FERRITIN",))
 
     result = structure_report(
         REPORT, patient_sex="female", metric_index=INDEX, client=client, model="m"
@@ -469,41 +496,19 @@ def test_a_page_still_declined_is_left_out_with_a_review_warning() -> None:
         "Urine Albumin/Creatinine Ratio",
     ]
     assert result.warnings == (service.unread_page_warning(5),)
-    assert "page 5" in result.warnings[0]
+    assert "Page 5" in result.warnings[0]
     assert "Add a test that was missed" in result.warnings[0]
 
 
 def test_a_report_the_model_declines_entirely_fails() -> None:
-    client = PartwiseClient(refuse=("Sample type",))
+    client = PagewiseClient(refuse=("Sample type",))
 
     with pytest.raises(StructuringError, match="could not read this report"):
         structure_report(REPORT, patient_sex="female", metric_index=INDEX, client=client, model="m")
-    assert len(client.calls) == 7  # the whole report, then each of its three pages, twice each
+    assert len(client.calls) == 6  # each of the three pages, twice each
 
 
-def test_a_part_too_large_for_the_free_tier_is_read_page_by_page() -> None:
-    whole, _ = structure()
-
-    class TooLargeForWholeReport(PartwiseClient):
-        def complete_json(self, **kwargs: Any) -> str:
-            if kwargs["user"] == REPORT.llm_text():
-                self.calls.append(kwargs)
-                raise LLMTooLargeError("The text was too large for the AI service's free tier.")
-            return super().complete_json(**kwargs)
-
-    client = TooLargeForWholeReport()
-    result = structure_report(
-        REPORT, patient_sex="female", metric_index=INDEX, client=client, model="test-model"
-    )
-
-    assert [call["user"] for call in client.calls] == [REPORT.llm_text(), *PAGES]  # no 2nd try
-    assert result == whole
-
-
-def test_a_page_too_large_even_alone_is_treated_like_a_declined_page(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(service, "MAX_PART_CHARS", 10)
+def test_a_page_too_large_for_the_free_tier_is_treated_like_a_declined_page() -> None:
     client = FakeChatClient(LLMTooLargeError("The text was too large for the AI service."))
 
     with pytest.raises(StructuringError, match="could not read this report"):

@@ -187,8 +187,8 @@ jobs:
             http://localhost:8000/families)"
           if [ "$code" != "401" ]; then echo "::error::/families without a token gave $code"; exit 1; fi
 
-          # Upload the synthetic report. CI has no GROQ_API_KEY, so background processing must
-          # end in "failed" with that reason (extraction itself runs first and succeeds).
+          # Upload the synthetic report. Its results are read from its tables, so it reaches
+          # review although CI has no GROQ_API_KEY (only pages the tables cannot give need it).
           pdf=backend/tests/fixtures/synthetic_thyrocare_report.pdf
           upload() {
             curl --silent --output /tmp/upload.json --write-out '%{http_code}' -X POST \
@@ -206,10 +206,13 @@ jobs:
           done
           report="$(curl --silent --fail "http://localhost:8000/reports/$report_id" -H "$auth")"
           echo "$report"
-          echo "$report" | jq -e '.status == "failed"' > /dev/null
-          echo "$report" | jq -e '.failure_reason | contains("GROQ_API_KEY")' > /dev/null
+          echo "$report" | jq -e '.status == "pending_review"' > /dev/null
+          curl --silent --fail "http://localhost:8000/reports/$report_id/review" -H "$auth" \
+            | jq -e '.rows | length == 4' > /dev/null
           code="$(upload)"
           if [ "$code" != "409" ]; then echo "::error::duplicate upload gave $code"; exit 1; fi
+          # The startup command (run before uvicorn) finds no report left half-read.
+          docker exec api python -m app.cli.startup | grep -q "0 interrupted report(s)"
 
           # Chat is wired, behind auth, and says clearly that CI has no Groq key.
           code="$(curl --silent --output /tmp/chat.json --write-out '%{http_code}' -X POST \
@@ -223,8 +226,8 @@ jobs:
             -d '{"messages": [{"role": "user", "content": "Hi"}]}')"
           if [ "$code" != "401" ]; then echo "::error::family chat without a token gave $code"; exit 1; fi
 
-          # Insights are wired. Nothing is saved yet (no Groq key), so there are none, and
-          # explaining them returns at once without calling the AI.
+          # Insights are wired. Nothing is saved yet (the report awaits review), so there are
+          # none, and explaining them returns at once without calling the AI.
           curl --silent --fail "http://localhost:8000/patients/$member_id/insights" -H "$auth" \
             | jq -e '. == []' > /dev/null
           curl --silent --fail -X POST "http://localhost:8000/patients/$member_id/insights/explain" \

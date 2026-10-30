@@ -5,7 +5,8 @@ matches and flags are all derived here, deterministically, and every copied valu
 against the source text so a hallucinated number is caught in review, not saved.
 """
 
-from dataclasses import dataclass
+import logging
+from collections.abc import Callable
 from functools import partial
 
 from pydantic import ValidationError
@@ -13,7 +14,7 @@ from pydantic import ValidationError
 from app.models import Sex
 from app.services.extraction import ExtractedReport, PiiLeakError
 from app.services.extraction.pii import find_leaks
-from app.services.llm import ChatClient, Effort, LLMRefusalError, LLMTooLargeError
+from app.services.llm import ChatClient, Effort, LLMError, LLMRefusalError, LLMTooLargeError
 from app.services.normalization import (
     MetricIndex,
     RangeLine,
@@ -32,11 +33,14 @@ from app.services.structuring.schemas import (
     StructuredReport,
     StructuringError,
 )
+from app.services.structuring.table_reader import read_table
 
 VALUE_NOT_IN_SOURCE = "The value was not found in the report text: check it against the PDF"
 NAME_NOT_IN_SOURCE = "The test name was not found in the report text: check it against the PDF"
 UNKNOWN_TEST = "Not in the metric dictionary yet: choose the matching test or keep it as is"
 NO_RANGE_CHOSEN = "No printed range matched this patient: check the reference range"
+
+logger = logging.getLogger(__name__)
 
 
 def _squash(text: str) -> str:
@@ -115,44 +119,6 @@ def normalize_test(
     )
 
 
-# Groq's free tier allows 8,000 tokens a minute per model, counting the text sent (about 3.2
-# characters a token, plus ~750 tokens of instructions and schema) and the reply (about as
-# long as the text). A large health checkup does not fit in one request, so pages are sent in
-# parts of at most this many characters: roughly 4,000-5,000 tokens a part with its reply.
-# A page is never split, so a test's name, value, range and method stay together.
-MAX_PART_CHARS = 6_000
-
-
-@dataclass(frozen=True)
-class ReportPart:
-    page_numbers: tuple[int, ...]  # in the original PDF
-    pages: tuple[str, ...]  # each page's scrubbed text, labelled with its sample type
-
-    @property
-    def text(self) -> str:
-        return "\n\n".join(self.pages)
-
-    def single_pages(self) -> list["ReportPart"]:
-        return [ReportPart((n,), (p,)) for n, p in zip(self.page_numbers, self.pages, strict=True)]
-
-
-def report_parts(report: ExtractedReport) -> list[ReportPart]:
-    """The text to send, in parts of whole pages, in page order."""
-    parts: list[ReportPart] = []
-    size = 0
-    for number, page in zip(
-        (p.page_number for p in report.pages), report.page_llm_texts(), strict=True
-    ):
-        if parts and size + 2 + len(page) <= MAX_PART_CHARS:  # 2: the blank line between
-            last = parts[-1]
-            parts[-1] = ReportPart((*last.page_numbers, number), (*last.pages, page))
-            size += 2 + len(page)
-        else:
-            parts.append(ReportPart((number,), (page,)))
-            size = len(page)
-    return parts
-
-
 def possibly_missed_warning(page_number: int, names: list[str]) -> str:
     shown = ", ".join(names[:5]) + (f" and {len(names) - 5} more" if len(names) > 5 else "")
     return (
@@ -163,7 +129,7 @@ def possibly_missed_warning(page_number: int, names: list[str]) -> str:
 
 def unread_page_warning(page_number: int) -> str:
     return (
-        f"The AI could not read page {page_number} of the PDF, so its results are not listed "
+        f"Page {page_number} of the PDF could not be read, so its results are not listed "
         'here. Add them from the PDF with "Add a test that was missed".'
     )
 
@@ -189,18 +155,35 @@ def _structure_part(
         parsed = LlmReport.model_validate_json(reply)
     except ValidationError as exc:
         raise StructuringError("The AI returned the results in an unexpected shape.") from exc
-    # Each value is checked against the part it came from.
+    # Each value is checked against the page it came from.
     return [
         normalize_test(test, sex=patient_sex, metric_index=metric_index, source_text=text)
         for test in parsed.tests
     ]
 
 
-# How each request is tried (see `structure_report`): a part of several pages once, cheaply,
-# before it is split into pages; a single page cheaply, then with more reasoning, which reads
-# pages that the cheap setting declines or breaks (at about three times the tokens).
-PART_EFFORTS: tuple[Effort, ...] = ("low",)
+# How the AI reads a page: with low reasoning effort, then more, which reads pages that low
+# effort declines or breaks (at about three times the tokens).
 PAGE_EFFORTS: tuple[Effort, ...] = ("low", "medium")
+# These mean the AI cannot read this page. Any other error (busy, daily limit used up, request
+# rejected, no key) means it cannot read any page now.
+_PAGE_FAILURES = (LLMRefusalError, LLMTooLargeError, StructuringError)
+
+
+def _read_with_ai(
+    text: str, page_number: int, structure: Callable[..., list[StructuredMetric]]
+) -> list[StructuredMetric] | None:
+    for effort in PAGE_EFFORTS:
+        try:
+            return structure(text, effort=effort)
+        except _PAGE_FAILURES as exc:
+            logger.warning(
+                "The AI could not read page %d (%s, %s effort)",
+                page_number,
+                type(exc).__name__,
+                effort,
+            )
+    return None
 
 
 def structure_report(
@@ -211,18 +194,21 @@ def structure_report(
     client: ChatClient,
     model: str,
 ) -> StructuredReport:
-    """Only `report.llm_text()` (scrubbed results) is ever sent to the LLM, in parts of whole
-    pages when it is large (`MAX_PART_CHARS`).
+    """Reviewable rows for the report's results.
 
-    gpt-oss now and then declines a request ("I'm sorry, but I can't help with that"), returns
-    JSON in a broken shape, or Groq finds the request too large for the free tier's minute;
-    not the same way twice. A part of several pages that fails is read one page at a time; a
-    page is tried with low reasoning effort, then medium; a page that still fails is left out
-    with a review warning, so the person adds those results from the PDF (the review shows it
-    alongside). Any other error (service busy, request rejected) fails the whole report."""
-    parts = report_parts(report)
-    for part in parts:  # second check, right at the LLM boundary, before anything is sent
-        if leaks := find_leaks(part.text, report.identity):
+    Each page's results table is read from the positions of its words (`read_table`), with no
+    AI. Only a page whose table could not be read completely (no rows, or a line that looks
+    like a result left over) is given to the AI: one page at a time, only its scrubbed text
+    (`page_llm_texts`). gpt-oss now and then declines a page or breaks the JSON, so a page is
+    tried with low reasoning effort, then medium. A page the AI cannot read keeps the rows read
+    from its table, with a review warning naming what may be missing; the person adds it from
+    the PDF, which the review shows alongside. The report fails only if nothing could be read.
+    """
+    readings = [read_table(page) for page in report.pages]
+    texts = report.page_llm_texts()
+    for_ai = {i for i, reading in enumerate(readings) if not reading.tests or reading.unread}
+    for i in sorted(for_ai):  # a second check, right at the LLM boundary, before any request
+        if leaks := find_leaks(texts[i], report.identity):
             raise PiiLeakError(f"Identity data found in text meant for the AI ({', '.join(leaks)})")
     structure = partial(
         _structure_part,
@@ -232,34 +218,42 @@ def structure_report(
         model=model,
     )
 
-    def attempt(part: ReportPart) -> list[StructuredMetric] | None:
-        for effort in PAGE_EFFORTS if len(part.pages) == 1 else PART_EFFORTS:
-            try:
-                return structure(part.text, effort=effort)
-            except (LLMRefusalError, LLMTooLargeError, StructuringError):
-                continue
-        return None
-
     metrics: list[StructuredMetric] = []
     warnings: list[str] = []
-    read: list[ReportPart] = []
-    pending = list(parts)
-    while pending:
-        part = pending.pop(0)
-        rows = attempt(part)
-        if rows is not None:
-            metrics += rows
-            read.append(part)
-        elif len(part.pages) > 1:
-            pending[:0] = part.single_pages()
-        else:
-            warnings.append(unread_page_warning(part.page_numbers[0]))
-    if not metrics and warnings:  # no page could be read
-        raise StructuringError("The AI could not read this report. Please try again later.")
-    for part in read:
-        for number, page in zip(part.page_numbers, part.pages, strict=True):
-            if names := possibly_missed(page, metrics):
-                warnings.append(possibly_missed_warning(number, names))
+    warned: set[int] = set()
+    unavailable: LLMError | None = None  # the AI service cannot be used now: stop asking it
+    for i, (page, reading) in enumerate(zip(report.pages, readings, strict=True)):
+        number = page.page_number
+        if i in for_ai and unavailable is None:
+            try:
+                rows = _read_with_ai(texts[i], number, structure)
+            except LLMError as exc:
+                logger.warning(
+                    "The AI could not be used for page %d (%s)", number, type(exc).__name__
+                )
+                unavailable, rows = exc, None
+            if rows is not None:
+                metrics += rows
+                continue
+        metrics += [
+            normalize_test(test, sex=patient_sex, metric_index=metric_index, source_text=texts[i])
+            for test in reading.tests
+        ]
+        if i in for_ai:
+            warned.add(number)
+            if reading.tests:
+                warnings.append(possibly_missed_warning(number, list(reading.unread)))
+            else:
+                warnings.append(unread_page_warning(number))
     if not metrics:
-        warnings.append("No test results were found in the report.")
+        if unavailable is not None:
+            raise unavailable
+        if warnings:  # no page could be read
+            raise StructuringError("The AI could not read this report. Please try again later.")
+        return StructuredReport(
+            model=model, metrics=(), warnings=("No test results were found in the report.",)
+        )
+    for page, text in zip(report.pages, texts, strict=True):
+        if page.page_number not in warned and (names := possibly_missed(text, metrics)):
+            warnings.append(possibly_missed_warning(page.page_number, names))
     return StructuredReport(model=model, metrics=tuple(metrics), warnings=tuple(warnings))

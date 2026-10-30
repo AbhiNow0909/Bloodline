@@ -48,7 +48,7 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents 9 0 R >>
 endobj
 9 0 obj
-<< /Length 1945 >>
+<< /Length 2179 >>
 stream
 BT /F1 9.0 Tf 36.00 800.00 Td (Processed At :) Tj ET
 BT /F1 9.0 Tf 36.00 786.00 Td (12th Floor, 404 SYN Tower Testpur-4) Tj ET
@@ -62,8 +62,14 @@ BT /F1 9.0 Tf 320.00 730.00 Td (Report Released on \(RRT\) : 04 Mar 2025 10:05) 
 BT /F1 9.0 Tf 36.00 716.00 Td (Block,XYZ Colony,FAKESTATE - 01, , Testpur, Testpur, INDIA,) Tj ET
 BT /F1 9.0 Tf 320.00 716.00 Td (Sample Type | Barcode : URINE | ZZ123456) Tj ET
 BT /F1 9.0 Tf 36.00 702.00 Td (400000) Tj ET
-BT /F1 9.0 Tf 36.00 688.00 Td (TEST NAME TECHNOLOGY VALUE UNITS) Tj ET
-BT /F1 9.0 Tf 36.00 674.00 Td (CREATININE - URINE PHOTOMETRY 84.20 mg/dL) Tj ET
+BT /F1 9.0 Tf 36.00 688.00 Td (TEST NAME) Tj ET
+BT /F1 9.0 Tf 265.00 688.00 Td (TECHNOLOGY) Tj ET
+BT /F1 9.0 Tf 402.00 688.00 Td (VALUE) Tj ET
+BT /F1 9.0 Tf 463.00 688.00 Td (UNITS) Tj ET
+BT /F1 9.0 Tf 36.00 674.00 Td (CREATININE - URINE) Tj ET
+BT /F1 9.0 Tf 265.00 674.00 Td (PHOTOMETRY) Tj ET
+BT /F1 9.0 Tf 402.00 674.00 Td (84.20) Tj ET
+BT /F1 9.0 Tf 463.00 674.00 Td (mg/dL) Tj ET
 BT /F1 9.0 Tf 36.00 660.00 Td (Bio. Ref. Interval. :) Tj ET
 BT /F1 9.0 Tf 36.00 646.00 Td (Male: 39 - 259 mg/dl) Tj ET
 BT /F1 9.0 Tf 36.00 632.00 Td (Female: 28 - 217 mg/dl) Tj ET
@@ -81,7 +87,7 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents 11 0 R >>
 endobj
 11 0 obj
-<< /Length 2477 >>
+<< /Length 2828 >>
 stream
 BT /F1 9.0 Tf 36.00 800.00 Td (Processed At :) Tj ET
 BT /F1 9.0 Tf 36.00 786.00 Td (12th Floor, 404 SYN Tower Testpur-4) Tj ET
@@ -95,13 +101,22 @@ BT /F1 9.0 Tf 320.00 730.00 Td (Report Released on \(RRT\) : 04 Mar 2025 10:05) 
 BT /F1 9.0 Tf 36.00 716.00 Td (Block,XYZ Colony,FAKESTATE - 01, , Testpur, Testpur, INDIA,) Tj ET
 BT /F1 9.0 Tf 320.00 716.00 Td (Sample Type | Barcode : URINE | ZZ123456) Tj ET
 BT /F1 9.0 Tf 36.00 702.00 Td (400000) Tj ET
-BT /F1 9.0 Tf 36.00 688.00 Td (TEST NAME TECHNOLOGY VALUE UNITS) Tj ET
+BT /F1 9.0 Tf 36.00 688.00 Td (TEST NAME) Tj ET
+BT /F1 9.0 Tf 265.00 688.00 Td (TECHNOLOGY) Tj ET
+BT /F1 9.0 Tf 402.00 688.00 Td (VALUE) Tj ET
+BT /F1 9.0 Tf 463.00 688.00 Td (UNITS) Tj ET
 BT /F1 9.0 Tf 36.00 674.00 Td (DIABETES SCREEN \(URINE\)) Tj ET
-BT /F1 9.0 Tf 36.00 660.00 Td (URINARY MICROALBUMIN PHOTOMETRY 12.6 µg/mL) Tj ET
+BT /F1 9.0 Tf 36.00 660.00 Td (URINARY MICROALBUMIN) Tj ET
+BT /F1 9.0 Tf 265.00 660.00 Td (PHOTOMETRY) Tj ET
+BT /F1 9.0 Tf 402.00 660.00 Td (12.6) Tj ET
+BT /F1 9.0 Tf 463.00 660.00 Td (µg/mL) Tj ET
 BT /F1 9.0 Tf 36.00 646.00 Td (Bio. Ref. Interval. :) Tj ET
 BT /F1 9.0 Tf 36.00 632.00 Td (Adults: Less than 30 µg/ml) Tj ET
 BT /F1 9.0 Tf 36.00 618.00 Td (Method : Fully Automated Immuno Turbidometry) Tj ET
-BT /F1 9.0 Tf 36.00 604.00 Td (URI. ALBUMIN/CREATININE RATIO \(UA/C\) CALCULATED 15.0 µg/mg of Creatinine) Tj ET
+BT /F1 9.0 Tf 36.00 604.00 Td (URI. ALBUMIN/CREATININE RATIO \(UA/C\)) Tj ET
+BT /F1 9.0 Tf 265.00 604.00 Td (CALCULATED) Tj ET
+BT /F1 9.0 Tf 402.00 604.00 Td (15.0) Tj ET
+BT /F1 9.0 Tf 463.00 604.00 Td (µg/mg of Creatinine) Tj ET
 BT /F1 9.0 Tf 36.00 590.00 Td (Bio. Ref. Interval. :) Tj ET
 BT /F1 9.0 Tf 36.00 576.00 Td (Adults : Less than 30 µg/mg of Creatinine) Tj ET
 BT /F1 9.0 Tf 36.00 562.00 Td (Method : Derived from Albumin and Creatinine values) Tj ET
@@ -120,7 +135,7 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents 13 0 R >>
 endobj
 13 0 obj
-<< /Length 1934 >>
+<< /Length 2168 >>
 stream
 BT /F1 9.0 Tf 36.00 800.00 Td (Processed At :) Tj ET
 BT /F1 9.0 Tf 36.00 786.00 Td (12th Floor, 404 SYN Tower Testpur-4) Tj ET
@@ -134,8 +149,14 @@ BT /F1 9.0 Tf 320.00 730.00 Td (Report Released on \(RRT\) : 04 Mar 2025 10:05) 
 BT /F1 9.0 Tf 36.00 716.00 Td (Block,XYZ Colony,FAKESTATE - 01, , Testpur, Testpur, INDIA,) Tj ET
 BT /F1 9.0 Tf 320.00 716.00 Td (Sample Type | Barcode : SERUM | ZZ654321) Tj ET
 BT /F1 9.0 Tf 36.00 702.00 Td (400000) Tj ET
-BT /F1 9.0 Tf 36.00 688.00 Td (TEST NAME TECHNOLOGY VALUE UNITS) Tj ET
-BT /F1 9.0 Tf 36.00 674.00 Td (FERRITIN C.M.I.A 48.3 ng/mL) Tj ET
+BT /F1 9.0 Tf 36.00 688.00 Td (TEST NAME) Tj ET
+BT /F1 9.0 Tf 265.00 688.00 Td (TECHNOLOGY) Tj ET
+BT /F1 9.0 Tf 402.00 688.00 Td (VALUE) Tj ET
+BT /F1 9.0 Tf 463.00 688.00 Td (UNITS) Tj ET
+BT /F1 9.0 Tf 36.00 674.00 Td (FERRITIN) Tj ET
+BT /F1 9.0 Tf 265.00 674.00 Td (C.M.I.A) Tj ET
+BT /F1 9.0 Tf 402.00 674.00 Td (48.3) Tj ET
+BT /F1 9.0 Tf 463.00 674.00 Td (ng/mL) Tj ET
 BT /F1 9.0 Tf 36.00 660.00 Td (Bio. Ref. Interval. :) Tj ET
 BT /F1 9.0 Tf 36.00 646.00 Td (Men: 21.81 - 274.66 ng/ml) Tj ET
 BT /F1 9.0 Tf 36.00 632.00 Td (Women: 4.63 - 204.00 ng/ml) Tj ET
@@ -173,14 +194,14 @@ xref
 0000000835 00000 n 
 0000001999 00000 n 
 0000002125 00000 n 
-0000004121 00000 n 
-0000004249 00000 n 
-0000006778 00000 n 
-0000006906 00000 n 
-0000008892 00000 n 
-0000009020 00000 n 
+0000004355 00000 n 
+0000004483 00000 n 
+0000007363 00000 n 
+0000007491 00000 n 
+0000009711 00000 n 
+0000009839 00000 n 
 trailer
 << /Size 16 /Root 1 0 R >>
 startxref
-9463
+10282
 %%EOF

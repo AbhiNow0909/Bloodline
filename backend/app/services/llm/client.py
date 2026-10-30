@@ -90,6 +90,10 @@ class AgentClient(Protocol):
 
 def _is_retryable(exc: Exception) -> bool:
     # 429, 5xx, and network failures/timeouts (APITimeoutError is an APIConnectionError).
+    # Groq also answers "request too large" (413) when the current minute's tokens are spent,
+    # and then says when to try again: that is waited out like a 429.
+    if isinstance(exc, groq.APIStatusError) and exc.status_code == 413:
+        return _retry_after(exc) is not None
     return isinstance(exc, groq.RateLimitError | groq.InternalServerError | groq.APIConnectionError)
 
 
@@ -160,19 +164,9 @@ class GroqChatClient:
         self._sleep = sleep
 
     def _send[T](self, call: Callable[[], T]) -> T:
-        """Run one API call with our retry policy, mapping failures to LLMError.
-
-        Groq sometimes answers "request too large" (413) for a request that fits once the
-        current minute's tokens are spent, and says when to try again; that wait is taken
-        once. A 413 without a usable wait, or a second one, is `LLMTooLargeError`."""
+        """Run one API call with our retry policy, mapping failures to LLMError. A 413 still
+        there after the retries, or one without a usable wait, is `LLMTooLargeError`."""
         try:
-            try:
-                return self._with_retries(call)
-            except groq.APIStatusError as exc:
-                wait = _retry_after(exc) if exc.status_code == 413 else None
-                if wait is None or wait > self._max_delay:
-                    raise
-                self._sleep(wait)
             return self._with_retries(call)
         except groq.RateLimitError as exc:
             raise LLMUnavailableError(_busy_message(exc)) from exc

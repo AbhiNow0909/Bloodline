@@ -153,7 +153,9 @@ In **Settings → Environments → production**:
    - **Framework Preset:** Vite (detected). Leave the build command (`npm run build`) and
      the output directory (`dist`) as they are.
    - **Environment Variables:** `VITE_API_BASE_URL` = `https://<name>.onrender.com`, for
-     **Production and Preview**.
+     **Production and Preview**, with type **Config**, not Secret. The address is public:
+     every `VITE_*` value is built into the page. Vercel refuses a Secret with this prefix,
+     and a saved Secret cannot be switched to Config; remove it and add it again.
 
      The build fails on purpose if this variable is missing or not `https://`. Otherwise the
      app would be built to call `localhost`. The address is also written into the page's
@@ -225,9 +227,12 @@ your shell history.
 - **Re-indexing report text** (only needed after changing chunking or the embedding model):
   run `python -m app.cli.rag reindex --all` from your machine with the production image,
   like `create_user` above. Render's free plan has no shell.
-- **Groq limits:** the free tier allows `gpt-oss-20b` about 200,000 tokens a day. A long
-  health checkup uses a large share of that. A report that fails for the daily limit can be
-  retried later from its page.
+- **Groq limits:** reports from the supported labs are read from their tables without the
+  AI, so uploads use no Groq tokens. Only a page whose table cannot be read goes to
+  `gpt-oss-20b` (free tier: about 200,000 tokens a day). Chat and explanations use
+  `gpt-oss-120b`, which has its own limits.
+- **A report stuck "being read"**: the server marks reports left half-read by a restart as
+  failed when it starts; open the report and use *Try reading it again*.
 
 ## Deploy checklist
 

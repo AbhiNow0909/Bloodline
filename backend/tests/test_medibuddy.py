@@ -28,6 +28,10 @@ from tests.structuring_data import SYNTHETIC_MEDIBUDDY_LLM_REPLY, FakeChatClient
 
 PDF = fake.FIXTURE_PATH.read_bytes()
 REPORT = extract_report(PDF)
+# The same pages without their table lines: read by the AI.
+AI_ONLY_REPORT = REPORT.model_copy(
+    update={"pages": tuple(page.model_copy(update={"table": ()}) for page in REPORT.pages)}
+)
 
 
 def test_committed_fixture_matches_its_generator() -> None:
@@ -190,7 +194,7 @@ def test_a_row_the_model_skipped_is_named_in_a_review_warning() -> None:
     reply["tests"] = [t for t in reply["tests"] if t["raw_name"] != "RBC Count"]
 
     result = structure_report(
-        REPORT,
+        AI_ONLY_REPORT,
         patient_sex="male",
         metric_index=seed_metric_index(),
         client=FakeChatClient(reply),
@@ -244,12 +248,13 @@ def test_upload_is_read_into_a_review(client: TestClient, db_session: Session) -
     review = client.get(f"/reports/{report_id}/review", headers=auth_headers(owner)).json()
     assert len(review["rows"]) == 9
     assert review["warnings"] == []  # same sex, a shared name word: nothing to check first
-    (call,) = model.calls
-    assert call["user"] == REPORT.llm_text()
+    assert model.calls == []  # read from its tables
 
 
 def test_extracted_report_round_trips_through_storage() -> None:
     stored = ExtractedReport.model_validate_json(REPORT.model_dump_json())
 
-    assert stored.pages == REPORT.pages
-    assert stored.identity.names == ()  # identity is never stored
+    # Identity and the table lines are never stored; a retry reads the PDF again.
+    assert stored.pages == tuple(page.model_copy(update={"table": ()}) for page in REPORT.pages)
+    assert stored.identity.names == ()
+    assert all(page.table for page in REPORT.pages)

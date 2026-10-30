@@ -2,7 +2,9 @@
 
 `synthetic_report()` mimics the layout of a Thyrocare report (issued via Healthcare OnTime):
 a cover page, a status summary, results pages whose header prints two columns side by side,
-sex-specific and "Less than" reference ranges, µg units, and a Conditions of Reporting page.
+results tables whose cells sit in columns (as in real reports, where the results are read
+from word positions), sex-specific and "Less than" reference ranges, µg units, and a
+Conditions of Reporting page.
 
 Regenerate the committed fixture after changing this file:
 
@@ -10,6 +12,7 @@ Regenerate the committed fixture after changing this file:
 """
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "synthetic_thyrocare_report.pdf"
@@ -20,6 +23,8 @@ TextRun = tuple[float, float, str, float]
 PAGE_WIDTH, PAGE_HEIGHT = 595, 842
 LEFT, RIGHT = 36.0, 320.0
 TOP, LINE = 800.0, 14.0
+# Where the real report starts its results columns: TEST NAME, TECHNOLOGY, VALUE, UNITS.
+NAME_X, TECHNOLOGY_X, VALUE_X, UNITS_X = LEFT, 265.0, 402.0, 463.0
 
 # The synthetic patient. Tests assert that none of these survive scrubbing.
 NAME = "ASHA FICTIONAL"
@@ -75,11 +80,26 @@ def build_pdf(pages: Sequence[Sequence[TextRun]]) -> bytes:
     return bytes(out)
 
 
-def lines(*rows: str | tuple[str, str], size: float = 9) -> list[TextRun]:
-    """Lay rows out top-down. A tuple row prints a left and a right column on the same line."""
+@dataclass(frozen=True)
+class Cells:
+    """Texts printed at given x positions on one line, like the cells of a results table."""
+
+    runs: tuple[tuple[float, str], ...]
+
+
+def cells(*runs: tuple[float, str]) -> Cells:
+    return Cells(runs)
+
+
+def lines(*rows: str | tuple[str, str] | Cells, size: float = 9) -> list[TextRun]:
+    """Lay rows out top-down. A tuple row prints a left and a right column on the same line;
+    a `Cells` row prints each text at its own x position."""
     runs: list[TextRun] = []
     for i, row in enumerate(rows):
         y = TOP - i * LINE
+        if isinstance(row, Cells):
+            runs.extend((x, y, text, size) for x, text in row.runs)
+            continue
         left, right = row if isinstance(row, tuple) else (row, "")
         if left:
             runs.append((LEFT, y, left, size))
@@ -88,7 +108,19 @@ def lines(*rows: str | tuple[str, str], size: float = 9) -> list[TextRun]:
     return runs
 
 
-def results_header(sample_type: str, barcode: str, name: str = NAME) -> list[str | tuple[str, str]]:
+def result_row(
+    name: str, technology: str, value: str, unit: str, *, columns: bool = True
+) -> Cells | str:
+    """A results-table line. Without columns it is printed as one run of text, with no column
+    gaps, so its table cannot be read from positions and the AI reads the page instead."""
+    if not columns:
+        return " ".join((name, technology, value, unit))
+    return cells((NAME_X, name), (TECHNOLOGY_X, technology), (VALUE_X, value), (UNITS_X, unit))
+
+
+def results_header(
+    sample_type: str, barcode: str, name: str = NAME, *, columns: bool = True
+) -> list[str | tuple[str, str] | Cells]:
     return [
         "Processed At :",
         LAB_ADDRESS[0],
@@ -98,7 +130,7 @@ def results_header(sample_type: str, barcode: str, name: str = NAME) -> list[str
         (f"Address : {ADDRESS_LINE_1}", "Report Released on (RRT) : 04 Mar 2025 10:05"),
         (ADDRESS_LINE_2, f"Sample Type | Barcode : {sample_type} | {barcode}"),
         "400000",
-        "TEST NAME TECHNOLOGY VALUE UNITS",
+        result_row("TEST NAME", "TECHNOLOGY", "VALUE", "UNITS", columns=columns),
     ]
 
 
@@ -142,10 +174,10 @@ def summary_page() -> list[TextRun]:
     )
 
 
-def creatinine_page() -> list[TextRun]:
+def creatinine_page(*, columns: bool = True) -> list[TextRun]:
     return lines(
-        *results_header("URINE", URINE_BARCODE),
-        "CREATININE - URINE PHOTOMETRY 84.20 mg/dL",
+        *results_header("URINE", URINE_BARCODE, columns=columns),
+        result_row("CREATININE - URINE", "PHOTOMETRY", "84.20", "mg/dL", columns=columns),
         "Bio. Ref. Interval. :",
         "Male: 39 - 259 mg/dl",
         "Female: 28 - 217 mg/dl",
@@ -156,15 +188,21 @@ def creatinine_page() -> list[TextRun]:
     )
 
 
-def microalbumin_page() -> list[TextRun]:
+def microalbumin_page(*, columns: bool = True) -> list[TextRun]:
     return lines(
-        *results_header("URINE", URINE_BARCODE),
+        *results_header("URINE", URINE_BARCODE, columns=columns),
         "DIABETES SCREEN (URINE)",
-        "URINARY MICROALBUMIN PHOTOMETRY 12.6 µg/mL",
+        result_row("URINARY MICROALBUMIN", "PHOTOMETRY", "12.6", "µg/mL", columns=columns),
         "Bio. Ref. Interval. :",
         "Adults: Less than 30 µg/ml",
         "Method : Fully Automated Immuno Turbidometry",
-        "URI. ALBUMIN/CREATININE RATIO (UA/C) CALCULATED 15.0 µg/mg of Creatinine",
+        result_row(
+            "URI. ALBUMIN/CREATININE RATIO (UA/C)",
+            "CALCULATED",
+            "15.0",
+            "µg/mg of Creatinine",
+            columns=columns,
+        ),
         "Bio. Ref. Interval. :",
         "Adults : Less than 30 µg/mg of Creatinine",
         "Method : Derived from Albumin and Creatinine values",
@@ -176,10 +214,10 @@ def microalbumin_page() -> list[TextRun]:
     )
 
 
-def ferritin_page() -> list[TextRun]:
+def ferritin_page(*, columns: bool = True) -> list[TextRun]:
     return lines(
-        *results_header("SERUM", SERUM_BARCODE),
-        "FERRITIN C.M.I.A 48.3 ng/mL",
+        *results_header("SERUM", SERUM_BARCODE, columns=columns),
+        result_row("FERRITIN", "C.M.I.A", "48.3", "ng/mL", columns=columns),
         "Bio. Ref. Interval. :",
         "Men: 21.81 - 274.66 ng/ml",
         "Women: 4.63 - 204.00 ng/ml",
@@ -200,14 +238,16 @@ def conditions_page() -> list[TextRun]:
     )
 
 
-def synthetic_report() -> bytes:
+def synthetic_report(*, columns: bool = True) -> bytes:
+    """The committed fixture. `columns=False`: the same report with its results tables printed
+    without column gaps, for tests of reading pages with the AI."""
     return build_pdf(
         [
             cover_page(),
             summary_page(),
-            creatinine_page(),
-            microalbumin_page(),
-            ferritin_page(),
+            creatinine_page(columns=columns),
+            microalbumin_page(columns=columns),
+            ferritin_page(columns=columns),
             conditions_page(),
         ]
     )

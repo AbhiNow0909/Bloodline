@@ -5,7 +5,7 @@ import re
 from app.models import Sex
 from app.services.extraction.header import ParsedHeader, parse_header, parse_medibuddy_header
 from app.services.extraction.layout import Layout, PageKind, classify_page, split_results_page
-from app.services.extraction.pdf_text import read_page_texts
+from app.services.extraction.pdf_text import read_pages
 from app.services.extraction.pii import find_leaks, scrub_text
 from app.services.extraction.schemas import (
     ExtractedReport,
@@ -15,6 +15,7 @@ from app.services.extraction.schemas import (
     ResultsPage,
     UnsupportedLayoutError,
 )
+from app.services.extraction.table import table_lines
 
 
 def _unique(values: list[str | None]) -> tuple[str, ...]:
@@ -60,7 +61,8 @@ def _skipped_pictures_warning(numbers: list[int]) -> str:
 
 def extract_report(pdf_bytes: bytes) -> ExtractedReport:
     """Raises `ExtractionError` subclasses with user-safe messages."""
-    texts = read_page_texts(pdf_bytes)
+    pdf_pages = read_pages(pdf_bytes)
+    texts = [page.text for page in pdf_pages]
     kinds = [classify_page(text) for text in texts]
     results = [i for i, kind in enumerate(kinds) if kind is PageKind.RESULTS]
     # Pages without text (pictures, or scans). Only ones after the last results page, such
@@ -96,7 +98,10 @@ def extract_report(pdf_bytes: bytes) -> ExtractedReport:
     pages = []
     for i in results:
         text = scrub_text(parts[i].results, identity)
-        if leaks := find_leaks(text, identity):
+        table = table_lines(
+            pdf_pages[i].words, parts[i].layout, lambda cell: scrub_text(cell, identity)
+        )
+        if leaks := find_leaks("\n".join([text, *(line.text for line in table)]), identity):
             raise PiiLeakError(f"Identity data remained after scrubbing ({', '.join(leaks)})")
         header = headers[i]
         pages.append(
@@ -107,6 +112,7 @@ def extract_report(pdf_bytes: bytes) -> ExtractedReport:
                 received_at=header.received_at,
                 released_at=header.released_at,
                 text=text,
+                table=table,
             )
         )
 

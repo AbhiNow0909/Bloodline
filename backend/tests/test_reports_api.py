@@ -32,6 +32,8 @@ from tests.structuring_data import FakeChatClient
 from tests.synthetic_pdf import FIXTURE_PATH
 
 PDF = FIXTURE_PATH.read_bytes()
+# The same report printed without column gaps: only the AI can read its pages.
+AI_ONLY_PDF = fake.synthetic_report(columns=False)
 
 
 @pytest.fixture
@@ -71,9 +73,9 @@ def upload(
     return client.post(f"/patients/{patient_id}/reports", content=body, headers=headers)
 
 
-def processed(client: TestClient, user: User, member: Patient) -> dict[str, Any]:
+def processed(client: TestClient, user: User, member: Patient, pdf: bytes = PDF) -> dict[str, Any]:
     """Upload the synthetic report; the background task has run when the call returns."""
-    response = upload(client, user, member.id)
+    response = upload(client, user, member.id, body=pdf)
     assert response.status_code == 202, response.text
     report: dict[str, Any] = client.get(
         f"/reports/{response.json()['id']}", headers=auth_headers(user)
@@ -119,17 +121,30 @@ def test_upload_is_processed_into_a_review(
     assert review["warnings"] == []  # "Asha" matches the printed name; sexes match
 
 
-def test_only_scrubbed_text_reaches_the_llm_or_the_database(
+def test_a_report_is_read_from_its_tables_without_the_llm(
     client: TestClient, llm: FakeChatClient, db_session: Session, alice: User, member: Patient
 ) -> None:
     report_id = processed(client, alice, member)["id"]
 
-    (call,) = llm.calls
+    assert llm.calls == []
     stored = json.dumps(db_session.get_one(Report, uuid.UUID(report_id)).raw_extraction)
     for value in (fake.NAME, *fake.NAME.split(), fake.URINE_BARCODE, fake.REFERRED_BY, fake.PHONE):
-        assert value.lower() not in call["user"].lower()
         assert value.lower() not in stored.lower()
     assert "CREATININE - URINE PHOTOMETRY 84.20 mg/dL" in stored  # scrubbed text kept for RAG
+
+
+def test_only_scrubbed_text_reaches_the_llm_or_the_database(
+    client: TestClient, llm: FakeChatClient, db_session: Session, alice: User, member: Patient
+) -> None:
+    report = processed(client, alice, member, AI_ONLY_PDF)
+
+    assert report["status"] == "pending_review"
+    assert len(llm.calls) == 3  # one per page
+    sent = json.dumps(llm.calls)
+    stored = json.dumps(db_session.get_one(Report, uuid.UUID(report["id"])).raw_extraction)
+    for value in (fake.NAME, *fake.NAME.split(), fake.URINE_BARCODE, fake.REFERRED_BY, fake.PHONE):
+        assert value.lower() not in sent.lower()
+        assert value.lower() not in stored.lower()
 
 
 @pytest.mark.parametrize(
@@ -387,7 +402,7 @@ def test_a_failed_report_can_be_retried(
     client: TestClient, llm: FakeChatClient, alice: User, member: Patient
 ) -> None:
     llm.reply = RuntimeError("provider blew up")
-    report = processed(client, alice, member)
+    report = processed(client, alice, member, AI_ONLY_PDF)
     assert (report["status"], report["failure_reason"]) == (
         "failed",
         "Processing failed unexpectedly. Please try again.",

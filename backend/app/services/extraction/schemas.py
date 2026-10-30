@@ -1,6 +1,7 @@
 """Results of extracting a lab-report PDF, and the errors that stop extraction."""
 
 from datetime import datetime
+from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -39,6 +40,42 @@ class PrintedIdentity(BaseModel):
     barcodes: tuple[str, ...] = ()
 
 
+class Column(StrEnum):
+    """A column of a results table, named by its heading on the page."""
+
+    NAME = "name"  # TEST NAME, TEST DESCRIPTION
+    TECHNOLOGY = "technology"  # TECHNOLOGY
+    METHOD = "method"  # METHODOLOGY
+    VALUE = "value"  # VALUE, RESULT
+    UNIT = "unit"  # UNITS
+    RANGE = "range"  # Bio. Ref. Interval., BIOLOGICAL REFERENCE INTERVAL
+
+
+class TableCell(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    # None for text running across several columns (notes, explanations), not a table cell.
+    column: Column | None
+    text: str = Field(description="Scrubbed")
+
+
+class TableLine(BaseModel):
+    """One printed line of a results table, as cells: words separated by a column gap."""
+
+    model_config = ConfigDict(frozen=True)
+
+    cells: tuple[TableCell, ...]
+
+    @property
+    def text(self) -> str:
+        return " ".join(cell.text for cell in self.cells)
+
+    def get(self, column: Column) -> str | None:
+        """The text in a column, or None if the line has nothing there."""
+        texts = [cell.text for cell in self.cells if cell.column is column]
+        return " ".join(texts) if texts else None
+
+
 class ResultsPage(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -48,6 +85,9 @@ class ResultsPage(BaseModel):
     received_at: datetime | None
     released_at: datetime | None
     text: str = Field(description="Scrubbed results region: safe to send to an LLM")
+    # The same region as table lines (word positions), for reading results without the AI.
+    # Not stored: a stored report read back has none, and a retry reads the PDF again.
+    table: tuple[TableLine, ...] = Field(default=(), exclude=True, repr=False)
 
 
 class ExtractedReport(BaseModel):

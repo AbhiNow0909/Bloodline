@@ -97,7 +97,9 @@ def oriented(line: RangeLine) -> RangeLine:
     and "Normal :: < 4.00" (a doubled colon); the model copies them as printed."""
     label = (line.label or "").strip(" :") or None
     text = line.text.strip().lstrip(":").strip()
-    if label and parse_bounds(label) and not parse_bounds(text):
+    # Only a category after the colon ("Desirable") is a label printed second. "<50 yr : Male:
+    # 0-15" is an age band with its own range, which must not become a range for men.
+    if label and parse_bounds(label) and not any(char.isdigit() for char in text):
         return RangeLine(label=text or None, text=label)
     if label is None and not parse_bounds(text):
         match = _LABEL_THEN_INTERVAL.match(text)
